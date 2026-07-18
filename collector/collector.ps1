@@ -1,0 +1,54 @@
+﻿#Requires -Version 5.1
+<#
+.SYNOPSIS
+PC稼働時間レコーダー（常駐ハートビート）。1分ごとに「タイムスタンプ,セッション状態」を月次CSVに追記する。
+
+.DESCRIPTION
+- スタンバイ/シャットダウン中はこのプロセスごと止まる＝記録が途切れるため、
+  「インターバルを大きく超えるギャップ＝PCオフ時間」として集計側で機械的に判定できる。
+- ロック中は state 列が locked になる（休憩時間の推定に使用）。
+- 管理者権限は不要。多重起動は mutex でガード。
+- 通常は run-collector.vbs 経由で非表示起動される（install.ps1 がスタートアップ登録する）。
+
+.PARAMETER ConfigPath
+config.json のパス。省略時はリポジトリルートの config.json（無ければデフォルト設定で動作）。
+#>
+[CmdletBinding()]
+param([string]$ConfigPath)
+
+$ErrorActionPreference = 'Stop'
+$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+. (Join-Path $scriptDir 'collector-lib.ps1')
+
+$repoRoot = Split-Path -Parent $scriptDir
+if (-not $ConfigPath) { $ConfigPath = Join-Path $repoRoot 'config.json' }
+$config = Get-CollectorConfig -ConfigPath $ConfigPath
+
+$dataDir = $config.DataDir
+if (-not [System.IO.Path]::IsPathRooted($dataDir)) { $dataDir = Join-Path $repoRoot $dataDir }
+$logPath = Join-Path $dataDir 'collector.log'
+
+# 多重起動ガード（2本目は静かに終了）
+$created = $false
+$mutex = New-Object System.Threading.Mutex($true, 'Local\WorkdayCollectorMutex', [ref]$created)
+if (-not $created) { exit 0 }
+
+try {
+    Write-CollectorLog -LogPath $logPath -Message ('collector started (pid={0}, interval={1}s, dataDir={2})' -f $PID, $config.HeartbeatSeconds, $dataDir)
+
+    while ($true) {
+        $now = Get-Date
+        $state = Get-SessionState
+        $file = Get-HeartbeatFilePath -DataDir $dataDir -Now $now
+        $line = Format-HeartbeatLine -Now $now -State $state
+        if (-not (Write-HeartbeatLine -FilePath $file -Line $line)) {
+            Write-CollectorLog -LogPath $logPath -Message ('write failed after retries: {0}' -f $file)
+        }
+        $waitSec = Get-SecondsUntilNextTick -Now (Get-Date) -IntervalSeconds $config.HeartbeatSeconds
+        Start-Sleep -Milliseconds ([int]([math]::Round($waitSec * 1000)))
+    }
+} finally {
+    Write-CollectorLog -LogPath $logPath -Message 'collector stopped'
+    try { $mutex.ReleaseMutex() } catch { }
+    $mutex.Dispose()
+}
