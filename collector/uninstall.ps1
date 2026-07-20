@@ -11,12 +11,21 @@ $ErrorActionPreference = 'Stop'
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 . (Join-Path $scriptDir 'collector-lib.ps1')
 
+# レジストリ Run キーの登録を削除
+$runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+$prop = Get-ItemProperty -Path $runKey -Name 'WorkdayCollector' -ErrorAction SilentlyContinue
+if ($prop) {
+    Remove-ItemProperty -Path $runKey -Name 'WorkdayCollector' -Force
+    Write-Host "スタートアップ登録(レジストリ Run)を削除しました: $runKey \ WorkdayCollector"
+} else {
+    Write-Host 'レジストリ Run の登録は見つかりませんでした（登録済みでない可能性）'
+}
+
+# 旧方式の Startup フォルダ .lnk も残っていれば削除
 $lnkPath = Join-Path ([Environment]::GetFolderPath('Startup')) 'WorkdayCollector.lnk'
 if (Test-Path -LiteralPath $lnkPath) {
     Remove-Item -LiteralPath $lnkPath -Force
-    Write-Host "スタートアップ登録を削除しました: $lnkPath"
-} else {
-    Write-Host 'スタートアップ登録は見つかりませんでした（登録済みでない可能性）'
+    Write-Host "旧スタートアップショートカット(.lnk)を削除しました: $lnkPath"
 }
 
 $stopped = Stop-CollectorProcess

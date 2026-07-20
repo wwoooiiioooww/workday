@@ -16,7 +16,12 @@
 
 2026-07-20、再起動後に「Windows Script Host」のエラーダイアログが発生し、ハートビートが更新されなくなった。原因はスタートアップフォルダの.lnkショートカットの`Arguments`フィールドが非Unicode(ANSI)コードページで保存される既知の制限で、OneDriveパス中の「005_AIツール」が「005_AI???」に化けて起動失敗していた。詳細・対策はworkday-rpa/SKILL.md参照。
 
-1回目の修正(`TargetPath=run-collector.vbs`・`Arguments=''`)は別のエラー(`WshShortcut.TargetPath`は実行可能ファイルしか受け付けず`ArgumentException`)で失敗した。**確定した最終対策**: TargetPathは`wscript.exe`(検証済み)に戻し、Argumentsには8.3短縮パス(常にASCII)を使う方式に変更(コミット参照)。`run-collector.vbs`自体は`WScript.ScriptFullName`で自己位置検出し`collector.ps1`を自動発見する仕様のまま。**この修正もまだ実機未検証**（Linux環境では.lnk生成・VBScript実行そのものを検証できない）。
+自動起動の登録方式は試行錯誤の末、**レジストリ HKCU Run キー方式に確定**(コミット参照):
+- .lnk方式は日本語OneDriveパスで2連続の壁(Arguments ANSI化け → TargetPathは.exe限定)に当たったため廃止。
+- 8.3短縮パス案も8dot3name無効環境での脆さから不採用。
+- 最終: `HKCU:\...\Run\WorkdayCollector = wscript.exe "<run-collector.vbsフルパス>"`(REG_SZ=Unicodeで日本語パス安全)。`run-collector.vbs`は`WScript.ScriptFullName`で自己位置検出し`collector.ps1`を発見する仕様。
+
+**注意: 実機で「ZIP上書きがinstall.ps1に反映されていない」事象が起きた**(古いバージョンが実行され、修正済みのはずのエラーが再現した)。OneDriveのファイルロック等が原因の可能性。次の担当は、修正を送る際は「本当に新しいファイルで実行されているか」をユーザーに確認させること(例: エラーの行番号・行内容が最新版と一致するか)。この回では、ZIP再取得に依存せず既存ファイルに対して直接レジストリ登録＋vbs再生成する**インラインのPowerShellワンショット**をユーザーに渡して不足を回避した。**レジストリ方式もまだ実機で再起動を跨いだ検証は未完**。
 
 ## 現在地
 

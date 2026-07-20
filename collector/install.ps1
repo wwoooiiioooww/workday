@@ -37,31 +37,27 @@ $config = Get-CollectorConfig -ConfigPath $configPath
 $dataDir = $config.DataDir
 if (-not [System.IO.Path]::IsPathRooted($dataDir)) { $dataDir = Join-Path $repoRoot $dataDir }
 
-# --- 2. スタートアップ登録 ---
-# TargetPathをrun-collector.vbs自身にすると、WshShortcut.TargetPathが
-# "Value does not fall within the expected range"で失敗した(実機確認、
-# 2026-07-20)。WshShortcutのTargetPathは実行可能ファイル(.exe等)のみを
-# 受け付けると見られるため、TargetPathは検証済みのwscript.exeに戻す。
-# Argumentsに日本語パスをそのまま渡すと、.lnkのArgumentsフィールドが
-# 非Unicode(ANSI)コードページで保存される既知の制限により文字が「?」に
-# 化けて起動失敗する不具合も実機で確認済み(2026-07-20)。
-# 対策として、8.3短縮パス(常にASCIIのみ)をArgumentsに使う。
-$fso = New-Object -ComObject Scripting.FileSystemObject
-$launcherVbsShort = $fso.GetFile($launcherVbs).ShortPath
-if ($launcherVbsShort -match '[^\x00-\x7F]') {
-    Write-Warning ('8.3短縮パスの取得に失敗した可能性があります(非ASCII文字が残存): {0}' -f $launcherVbsShort)
-    Write-Warning 'この場合スタートアップからの自動起動が失敗する可能性があります(ボリュームの8.3名生成が無効化されていないか要確認)。'
-}
+# --- 2. スタートアップ登録 (レジストリ HKCU Run キー) ---
+# 以前は Startup フォルダの .lnk ショートカットを使っていたが、日本語を含む
+# OneDrive パスで2つの問題に連続して当たったため、レジストリ Run キー方式に
+# 変更した(2026-07-20実機で確定):
+#   問題1: .lnk の Arguments フィールドは非Unicode(ANSI)で保存されるため、
+#          「005_AIツール」等の日本語が「?」に化けて再起動後の起動が失敗した。
+#   問題2: 回避策として TargetPath に .vbs を直接指定すると、TargetPath は
+#          実行可能ファイル(.exe等)しか受け付けず ArgumentException で失敗した。
+# レジストリ Run キー(HKCU)は値が REG_SZ = Unicode で保存されるため日本語パスを
+# そのまま安全に扱え、管理者権限も不要、8.3短縮名の有効/無効にも依存しない。
+$runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+$runValue = ('wscript.exe "{0}"' -f $launcherVbs)
+New-ItemProperty -Path $runKey -Name 'WorkdayCollector' -Value $runValue -PropertyType String -Force | Out-Null
+Write-Host "スタートアップに登録しました (レジストリ Run): $runKey \ WorkdayCollector"
 
-$startupDir = [Environment]::GetFolderPath('Startup')
-$lnkPath = Join-Path $startupDir 'WorkdayCollector.lnk'
-$shell = New-Object -ComObject WScript.Shell
-$shortcut = $shell.CreateShortcut($lnkPath)
-$shortcut.TargetPath = (Join-Path $env:WINDIR 'System32\wscript.exe')
-$shortcut.Arguments = ('"{0}"' -f $launcherVbsShort)
-$shortcut.Description = 'Workday勤怠ツール: PC稼働時間レコーダー'
-$shortcut.Save()
-Write-Host "スタートアップに登録しました: $lnkPath"
+# 旧方式の Startup フォルダ .lnk が残っていれば掃除する(重複起動やゴミの防止)
+$oldLnk = Join-Path ([Environment]::GetFolderPath('Startup')) 'WorkdayCollector.lnk'
+if (Test-Path -LiteralPath $oldLnk) {
+    Remove-Item -LiteralPath $oldLnk -Force -ErrorAction SilentlyContinue
+    Write-Host "旧スタートアップショートカット(.lnk)を削除しました: $oldLnk"
+}
 
 # --- 3. 既存プロセス停止 → 即時起動 ---
 $stopped = Stop-CollectorProcess

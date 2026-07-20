@@ -15,7 +15,8 @@ description: Workday勤怠自動入力プロジェクト固有の知見。PC稼�
 - **⚠️ ショートカット(.lnk)のArgumentsフィールドに日本語パスを入れてはいけない**（2026-07-20実機で発覚）: `WScript.Shell`の`CreateShortcut`/`Save()`で作る.lnkファイルは、`Arguments`フィールドを非Unicode(システムのANSIコードページ)で保存する既知の制限がある。OneDriveの「005_AIツール」のような日本語フォルダ名がArgumentsに入っていると、コードページの解決に失敗し文字が「?」に化けて起動失敗する（エラー例: `Loading script "...005_AI???...\run-collector.vbs" failed`）。
   - この問題は`Start-Process -ArgumentList`（CreateProcessW経由、Unicode安全）では起きない。install.ps1実行直後の即時起動が成功していたのはこのため。**症状が「初回は動くが再起動後だけ失敗する」場合はこの.lnk Arguments問題を疑うこと。**
   - **⚠️ TargetPathを回避策として`.vbs`のようなスクリプトファイル自体にするのはNG**（2026-07-20実機で発覚）: `WshShortcut.TargetPath`に`.vbs`ファイルパスを代入すると`ArgumentException: Value does not fall within the expected range`で失敗する。`WshShortcut.TargetPath`は実行可能ファイル(`.exe`等)しか受け付けないとみられる。
-  - **最終的な対策(確定)**: TargetPathは`wscript.exe`のフルパス(ASCIIのみ、実行可能ファイル)に固定し、Argumentsには対象スクリプトの**8.3短縮パス**(`(New-Object -ComObject Scripting.FileSystemObject).GetFile($path).ShortPath`、常にASCIIのみ)を渡す。日本語パス問題とTargetPath制限の両方を同時に回避できる。install.ps1は取得した短縮パスに非ASCII文字が残っていないか検査し、残っていれば警告を出す(8.3名生成が無効化されている可能性を示唆)。
+  - 8.3短縮パスを使う案も一度試したが不採用: ボリュームで8.3名生成が無効(`fsutil 8dot3name`)だと短縮パスが取得できず失敗する脆さがある。
+  - **✅ 最終的な対策(確定・自動起動はレジストリ Run キー方式に統一)**: `HKCU:\Software\Microsoft\Windows\CurrentVersion\Run` に `WorkdayCollector = wscript.exe "<run-collector.vbsのフルパス>"` を `REG_SZ` で登録する。レジストリ値はUnicodeで保存されるため日本語OneDriveパスがそのまま安全に扱え、管理者権限も8.3短縮名も不要。.lnk方式は完全に廃止し、install.ps1/uninstall.ps1は旧.lnkが残っていれば掃除する。**教訓: 非ASCIIパスでユーザー権限の自動起動を仕込むなら、最初からStartupフォルダの.lnkではなくレジストリRunキーを使うこと。**
 
 ## 稼働時間記録の設計原則
 
