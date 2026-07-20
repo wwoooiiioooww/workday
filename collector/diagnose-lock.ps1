@@ -8,7 +8,7 @@ Get-SessionState の判定材料(生の値)をその場で確認する診断ス�
 20秒間、1秒おきに以下を並べて表示する:
   - WTSQuerySessionInformation の生の戻り値(wtsOk, sessionId, level, flags)
   - OpenInputDesktop ベースの判定結果(旧方式)
-  - 最終的に Get-SessionState が返す判定
+  - SystemEvents.SessionSwitch イベント購読方式の判定(本番採用方式)
 表示中にロック/アンロックを試すと、どの値がどう変化する(あるいは変化しない)かが分かる。
 このスクリプトは常駐 collector.ps1 とは別プロセスなので、collector を止めずに実行できる。
 
@@ -20,9 +20,15 @@ $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 Initialize-DesktopProbe
 
 Write-Host '20秒間、1秒おきに判定材料を表示します。試しにロック/アンロックしてみてください。'
+Write-Host '(本番採用のイベント方式はロック直後にすぐ反映されないことがあります。'
+Write-Host ' ロック→数秒待つ→解除、の順で試すと分かりやすいです)'
 Write-Host ''
-Write-Host 'time     | wtsOk sid  level flags | oidResult | 最終判定'
-Write-Host '---------|-------------------------|-----------|----------'
+
+$eventState = @{ state = 'active' }
+Register-SessionSwitchTracking -StateHolder $eventState -SourceIdentifier 'WorkdayDiagnoseSessionSwitch'
+
+Write-Host 'time     | wtsOk sid  level flags | oidResult | event(本番) | 旧最終判定'
+Write-Host '---------|-------------------------|-----------|-------------|----------'
 
 $WTSSessionInfoEx = 25
 
@@ -57,11 +63,13 @@ for ($i = 0; $i -lt 20; $i++) {
 
     $judged = Get-SessionState
 
-    Write-Host ('{0} | {1,5} {2,4} {3,5} {4,5} | {5,-9} | {6}' -f `
-        (Get-Date -Format 'HH:mm:ss'), $wtsOk, $sid, $level, $flags, $oidResult, $judged)
+    Write-Host ('{0} | {1,5} {2,4} {3,5} {4,5} | {5,-9} | {6,-11} | {7}' -f `
+        (Get-Date -Format 'HH:mm:ss'), $wtsOk, $sid, $level, $flags, $oidResult, $eventState['state'], $judged)
 
     Start-Sleep -Seconds 1
 }
 
+Unregister-SessionSwitchTracking -SourceIdentifier 'WorkdayDiagnoseSessionSwitch'
+
 Write-Host ''
-Write-Host 'この表をそのままコピーしてAIに貼ってください。'
+Write-Host 'この表をそのままコピーしてAIに貼ってください。「event(本番)」列がロック/解除にきちんと追従していればOKです。'

@@ -151,15 +151,14 @@ public static extern void WTSFreeMemory(IntPtr pMemory);
     }
 }
 
-# セッション状態の判定（優先度順）:
-# 1. WTSQuerySessionInformation(WTSSessionInfoEx): Windowsのセッション管理自体が
-#    保持しているロック/アンロックのフラグを直接読む。どのUIが前面に出ているかに
-#    依存しないため最も信頼できる。
-#    (OpenInputDesktopやLogonUIプロセスの有無で判定する方式は、ロック直後は
-#     パスワード入力UIがまだ起動していないため「active」に誤判定することが
-#     実機検証で確認された。)
-# 2. 上記が使えない環境向けのフォールバックとして OpenInputDesktop を残す。
-# 3. すべて失敗した場合は 'active' とみなす（記録が完全に止まるより安全側）。
+# セッション状態の判定（ポーリング方式・診断用に残置）。
+# 2026-07-20の実機診断で、WTSQuerySessionInformation・OpenInputDesktopの
+# どちらも Shota の企業PC環境では信頼できないことが判明した
+# (WTS方式は常にlocked固定、OpenInputDesktop方式は数秒間隔で無意味に
+# active/lockedが入れ替わっていた。VPN/エンドポイントセキュリティ由来の
+# セッション判定のずれが疑われる)。
+# このため常駐ループの本番判定にはもう使わず、collector/diagnose-lock.ps1
+# での比較表示にのみ使う。本番判定は Register-SessionSwitchTracking を使う。
 function Get-SessionState {
     Initialize-DesktopProbe
 
@@ -197,6 +196,47 @@ function Get-SessionState {
         if (Get-Process -Name 'LogonUI' -ErrorAction SilentlyContinue) { return 'locked' }
         return 'active'
     }
+}
+
+# --- 本番判定: OSのロック/アンロック通知イベントを購読する方式 ---
+#
+# 上記のポーリングAPI(WTSQuerySessionInformation/OpenInputDesktop)は
+# セッションIDの取り違え等の影響を受けるが、SystemEvents.SessionSwitch は
+# winlogon が WM_WTSSESSION_CHANGE をブロードキャストした際にOS自身が発する
+# 一次通知であり、「どのセッションを見るか」を自分で選ぶ必要がないため
+# セッション判定のずれの影響を受けない。
+#
+# .NETのSystemEventsは初回購読時に専用の隠しウィンドウ+メッセージポンプを
+# 自前のスレッドに自動生成するため、PowerShellコンソール/常駐スクリプトの
+# ような非UIプロセスでも Application.Run 等を呼ばずにそのまま使える。
+#
+# StateHolder はイベントコールバック(別スレッドで実行される)とメインループの
+# 間で状態を共有するための Hashtable。文字列の代入/参照は原子的なので
+# 追加のロックは不要。
+function Register-SessionSwitchTracking {
+    param(
+        [Parameter(Mandatory = $true)][hashtable]$StateHolder,
+        [string]$SourceIdentifier = 'WorkdayCollectorSessionSwitch'
+    )
+    Add-Type -AssemblyName System
+    if (-not $StateHolder.ContainsKey('state')) { $StateHolder['state'] = 'active' }
+
+    Unregister-SessionSwitchTracking -SourceIdentifier $SourceIdentifier
+
+    Register-ObjectEvent -InputObject ([Microsoft.Win32.SystemEvents]) -EventName 'SessionSwitch' `
+        -SourceIdentifier $SourceIdentifier -MessageData $StateHolder -Action {
+            $reason = $Event.SourceEventArgs.Reason
+            if ($reason -eq [Microsoft.Win32.SessionSwitchReason]::SessionLock) {
+                $Event.MessageData['state'] = 'locked'
+            } elseif ($reason -eq [Microsoft.Win32.SessionSwitchReason]::SessionUnlock) {
+                $Event.MessageData['state'] = 'active'
+            }
+        } | Out-Null
+}
+
+function Unregister-SessionSwitchTracking {
+    param([string]$SourceIdentifier = 'WorkdayCollectorSessionSwitch')
+    Get-EventSubscriber -SourceIdentifier $SourceIdentifier -ErrorAction SilentlyContinue | Unregister-Event
 }
 
 # 実行中の collector.ps1 プロセスを停止する（install/uninstall用）。停止した数を返す。

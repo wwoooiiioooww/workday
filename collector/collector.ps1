@@ -36,6 +36,15 @@ if (-not $created) { exit 0 }
 try {
     Write-CollectorLog -LogPath $logPath -Message ('collector started (pid={0}, interval={1}s, dataDir={2})' -f $PID, $config.HeartbeatSeconds, $dataDir)
 
+    # ロック/アンロックの判定はOS通知イベント購読方式（詳細はcollector-lib.ps1参照）。
+    # ポーリングAPI(WTSQuerySessionInformation/OpenInputDesktop)は実機診断で
+    # 信頼できないことが判明したため使わない。起動直後、まだイベントを1度も
+    # 受け取っていない間は 'active' とみなす（通常はアクティブに使用中に
+    # インストールされるため。稀に起動時点で既にロック中だった場合のみ、
+    # 最初のUnlockイベントまでの間だけ実態と食い違う可能性がある）。
+    $sessionState = @{ state = 'active' }
+    Register-SessionSwitchTracking -StateHolder $sessionState
+
     # 書き込み失敗時のメモリバッファ。CSVをExcelで開いている間なども記録を落とさない。
     $backlog = New-Object 'System.Collections.Generic.List[object]'
     $backlogMax = 20000   # 約2週間分。異常時のメモリ暴走防止の上限で、通常は到達しない
@@ -43,7 +52,7 @@ try {
 
     while ($true) {
         $now = Get-Date
-        $state = Get-SessionState
+        $state = $sessionState['state']
         $file = Get-HeartbeatFilePath -DataDir $dataDir -Now $now
         $line = Format-HeartbeatLine -Now $now -State $state
 
@@ -66,6 +75,7 @@ try {
         Start-Sleep -Milliseconds ([int]([math]::Round($waitSec * 1000)))
     }
 } finally {
+    Unregister-SessionSwitchTracking
     Write-CollectorLog -LogPath $logPath -Message 'collector stopped'
     try { $mutex.ReleaseMutex() } catch { }
     $mutex.Dispose()

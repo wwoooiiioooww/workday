@@ -1,19 +1,24 @@
-# 引継ぎメモ（Fable 5 → 次の担当AI）
+# 引継ぎメモ（Fable 5 / Sonnet 5 → 次の担当AI）
 
 最終更新: 2026-07-20（Sonnet 5追記） / ブランチ: `claude/workday-auto-input-design-4zhqu2`
 
-## ⚠️ 最優先の未解決課題（Sonnet 5引継ぎ時点）
+## ⚠️ 最優先の未検証事項（Sonnet 5引継ぎ時点）
 
-`WTSQuerySessionInformation`方式のロック検知に切り替えた後、**実際はロックしていないのに`locked`が記録され続ける**新たな不具合が発覚（2026-07-20 16:13〜16:17、Shotaが実際にアクティブ使用中）。
-詳細・仮説は `workday-rpa/SKILL.md` の「未解決課題」参照。**推測で直さず**、`collector/diagnose-lock.ps1`（生のsessionId/level/flagsを表示する診断スクリプト）をShotaに実行してもらい、その結果を見てから原因特定・修正すること。この診断依頼をまだ送っていなければ最優先で送ること。
+ロック検知は3方式目（`SystemEvents.SessionSwitch`イベント購読）に切り替え済み。経緯:
+1. `OpenInputDesktop`/LogonUI判定 → 短いロックを見逃す(active誤判定)バグ
+2. `WTSQuerySessionInformation` → 逆に実際はロックしていないのに`locked`固定になるバグ（診断スクリプトでflags=0固定を確認。Shotaの企業PC環境ではセッションIDベースのポーリングAPIが2つとも信頼できないと判断）
+3. **`SystemEvents.SessionSwitch`イベント購読に方式転換**（OSの一次通知を直接受け取るためセッションID取り違えの影響を受けない）。詳細はworkday-rpa/SKILL.md参照
+
+**この3方式目はまだ実機検証していない**。Shotaに最新版を取得→`collector/diagnose-lock.ps1`を再実行してもらい、表の「event(本番)」列がロック/解除に正しく追従するか確認すること。OKなら`install.ps1`で常駐版も入れ替えて一晩検証へ。
 
 ## 現在地
 
-- **Phase 1 (Collector): 実機検証中、新規バグ発見中につきGoはまだ**
+- **Phase 1 (Collector): 実機検証中、ロック検知3回目の修正が検証待ちのためGoはまだ**
   - スタンバイ除外✅ / 多重起動ガード✅
-  - ロック検知: 短いロックの検知漏れは修正したが、上記の「誤ってlocked扱いが続く」新バグが発生中。**未解決**
+  - ロック検知: 上記参照。3回目の修正(イベント購読方式)が未検証
   - Excelロック中の記録消失→メモリバックログ方式で修正済み(コミット 11db66e)。**この修正版の実機確認がまだ**（15:48/49のwrite failedログは修正"前"の古いプロセスのものなので参考にならない。改めてExcelで開いたまま数分放置するテストが必要）
   - 「再起動後の自動再開」も実機未検証
+  - Shotaの取得方法はZIPダウンロードの上書きコピー運用（`.git`なし）。`git pull`は使えないので、都度ZIP再取得＋上書きコピーで案内すること
 - **Phase 2 (Planner): 着手直後**。`app/src/lib/` に集計・休憩ルールの純粋ロジック＋テストを置いた（このコミット参照）。CLI(plan.js)・preview.html生成・PTO対応は未実装
 - Phase 3 (Injector) / Phase 4 (Reporter): 未着手。設計はDESIGN.md確定済み（承認①取得済み）
 
