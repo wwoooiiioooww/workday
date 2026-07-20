@@ -91,6 +91,24 @@ function Write-HeartbeatLine {
     return $false
 }
 
+# 書き込めなかった行のバックログを先頭から順に追記する。
+# CSVをExcelで開くと排他ロックで書き込みが失敗するため（2026-07-20実機で2分分の
+# 記録消失が発生）、失敗した行は呼び出し側がメモリに保持し、書けるようになった
+# タイミングでこの関数が遡って追記する。行は File を持つため月境界も正しく扱える。
+function Write-HeartbeatBacklog {
+    param(
+        [Parameter(Mandatory = $true)][System.Collections.Generic.List[object]]$Backlog
+    )
+    while ($Backlog.Count -gt 0) {
+        $item = $Backlog[0]
+        if (-not (Write-HeartbeatLine -FilePath $item.File -Line $item.Line -MaxAttempts 1)) {
+            return $false
+        }
+        $Backlog.RemoveAt(0)
+    }
+    return $true
+}
+
 # 動作ログ（エラーと起動/停止のみ）。1MB超で .old にローテーション。
 function Write-CollectorLog {
     param(

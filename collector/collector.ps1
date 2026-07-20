@@ -36,14 +36,32 @@ if (-not $created) { exit 0 }
 try {
     Write-CollectorLog -LogPath $logPath -Message ('collector started (pid={0}, interval={1}s, dataDir={2})' -f $PID, $config.HeartbeatSeconds, $dataDir)
 
+    # 書き込み失敗時のメモリバッファ。CSVをExcelで開いている間なども記録を落とさない。
+    $backlog = New-Object 'System.Collections.Generic.List[object]'
+    $backlogMax = 20000   # 約2週間分。異常時のメモリ暴走防止の上限で、通常は到達しない
+    $wasFailing = $false
+
     while ($true) {
         $now = Get-Date
         $state = Get-SessionState
         $file = Get-HeartbeatFilePath -DataDir $dataDir -Now $now
         $line = Format-HeartbeatLine -Now $now -State $state
-        if (-not (Write-HeartbeatLine -FilePath $file -Line $line)) {
-            Write-CollectorLog -LogPath $logPath -Message ('write failed after retries: {0}' -f $file)
+
+        $backlog.Add(@{ File = $file; Line = $line })
+        if ($backlog.Count -gt $backlogMax) { $backlog.RemoveAt(0) }
+
+        if (Write-HeartbeatBacklog -Backlog $backlog) {
+            if ($wasFailing) {
+                Write-CollectorLog -LogPath $logPath -Message ('write recovered, backlog flushed: {0}' -f $file)
+                $wasFailing = $false
+            }
+        } else {
+            if (-not $wasFailing) {
+                Write-CollectorLog -LogPath $logPath -Message ('write failed, buffering in memory (file open in Excel?): {0}' -f $file)
+                $wasFailing = $true
+            }
         }
+
         $waitSec = Get-SecondsUntilNextTick -Now (Get-Date) -IntervalSeconds $config.HeartbeatSeconds
         Start-Sleep -Milliseconds ([int]([math]::Round($waitSec * 1000)))
     }

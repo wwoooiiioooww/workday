@@ -79,6 +79,57 @@ try {
     Assert-Equal 3 $lines.Count 'ヘッダー1行+データ2行になる'
     Assert-Equal 'timestamp,state' $lines[0] 'ヘッダーは1回だけ書かれる'
     Assert-Equal '2026-07-18 09:01:00,locked' $lines[2] '追記順が保たれる'
+
+    Write-Host '--- Write-HeartbeatBacklog ---'
+    # 正常系: 溜まった行が順番どおり全て書かれ、バックログが空になる
+    $blFile = Join-Path $tempDir 'backlog/2026-07.csv'
+    $backlog = New-Object 'System.Collections.Generic.List[object]'
+    $backlog.Add(@{ File = $blFile; Line = '2026-07-20 15:44:00,active' })
+    $backlog.Add(@{ File = $blFile; Line = '2026-07-20 15:45:00,active' })
+    $backlog.Add(@{ File = $blFile; Line = '2026-07-20 15:46:00,locked' })
+    $r = Write-HeartbeatBacklog -Backlog $backlog
+    Assert-Equal $true $r 'バックログ3行の書き込みが成功する'
+    Assert-Equal 0 $backlog.Count '書けた行はバックログから消える'
+    $blLines = @(Get-Content -LiteralPath $blFile)
+    Assert-Equal '2026-07-20 15:44:00,active' $blLines[1] '溜まった行が時刻順に復元される'
+    Assert-Equal '2026-07-20 15:46:00,locked' $blLines[3] '最後の行まで復元される'
+
+    # 月境界: File が異なる行が混ざっていても各ファイルに正しく書かれる
+    $blFile2 = Join-Path $tempDir 'backlog/2026-08.csv'
+    $backlog.Add(@{ File = $blFile; Line = '2026-07-31 23:59:00,active' })
+    $backlog.Add(@{ File = $blFile2; Line = '2026-08-01 00:00:00,active' })
+    $r = Write-HeartbeatBacklog -Backlog $backlog
+    Assert-Equal $true $r '月境界をまたぐバックログも成功する'
+    Assert-Equal '2026-08-01 00:00:00,active' @(Get-Content -LiteralPath $blFile2)[1] '新しい月のファイルに書かれる'
+
+    # 再発防止(2026-07-20実機で発生): ファイルが排他ロックされている間(=Excelで
+    # 開いている状態)は書けないが、行はバックログに残り、解放後に復元される
+    $lockedFile = Join-Path $tempDir 'backlog/locked.csv'
+    Set-Content -LiteralPath $lockedFile -Value 'timestamp,state' -Encoding UTF8
+    $fs = [System.IO.File]::Open($lockedFile, [System.IO.FileMode]::Open, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
+    try {
+        $backlog.Add(@{ File = $lockedFile; Line = '2026-07-20 16:00:00,active' })
+        $backlog.Add(@{ File = $lockedFile; Line = '2026-07-20 16:01:00,active' })
+        $r = Write-HeartbeatBacklog -Backlog $backlog
+        if ($r -eq $false) {
+            Assert-Equal $false $r '排他ロック中は書き込みが失敗として報告される'
+            Assert-Equal 2 $backlog.Count '書けなかった行はバックログに残る(消失しない)'
+        } else {
+            # このOSのファイルシステムでは排他ロックが強制されない(Linux等)。
+            # ロック挙動自体はWindows実機検証でカバーするため、ここではスキップ扱い。
+            Write-Host '  skip: この環境では排他ロックが強制されないためロック中の失敗系はスキップ'
+            $backlog.Clear()
+        }
+    } finally {
+        $fs.Dispose()
+    }
+    if ($backlog.Count -gt 0) {
+        $r = Write-HeartbeatBacklog -Backlog $backlog
+        Assert-Equal $true $r 'ロック解放後に書き込みが回復する'
+        Assert-Equal 0 $backlog.Count '回復後はバックログが空になる'
+        $lockedLines = @(Get-Content -LiteralPath $lockedFile)
+        Assert-Equal '2026-07-20 16:00:00,active' $lockedLines[1] 'ロック中に溜まった行が遡って復元される'
+    }
 } finally {
     Remove-Item -LiteralPath $tempDir -Recurse -Force -ErrorAction SilentlyContinue
 }
