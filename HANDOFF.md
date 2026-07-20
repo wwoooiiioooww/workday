@@ -2,26 +2,23 @@
 
 最終更新: 2026-07-20（Sonnet 5追記） / ブランチ: `claude/workday-auto-input-design-4zhqu2`
 
-## ⚠️ 最優先の未検証事項（Sonnet 5引継ぎ時点）
+## ✅ ロック検知バグは解決済み（4回目の実装で確定）
 
-ロック検知は3方式目（`SystemEvents.SessionSwitch`イベント購読）に切り替え済み。経緯:
-1. `OpenInputDesktop`/LogonUI判定 → 短いロックを見逃す(active誤判定)バグ
-2. `WTSQuerySessionInformation` → 逆に実際はロックしていないのに`locked`固定になるバグ（診断スクリプトでflags=0固定を確認。Shotaの企業PC環境ではセッションIDベースのポーリングAPIが2つとも信頼できないと判断）
-3. **`SystemEvents.SessionSwitch`イベント購読に方式転換**（OSの一次通知を直接受け取るためセッションID取り違えの影響を受けない）。詳細はworkday-rpa/SKILL.md参照
+経緯（同じ轍を踏まないよう必ず読むこと）:
+1. `OpenInputDesktop`/LogonUI判定 → 短いロックを見逃す(active誤判定)
+2. `WTSQuerySessionInformation` → 逆に実際はロックしていないのに`locked`固定
+3. `SystemEvents.SessionSwitch`イベント購読 → 購読成功するがイベントが一切届かない(.NET任せの内部実装が非UIホストで機能しない)
+4. **`WTSRegisterSessionNotification`を自前の非表示WinFormsウィンドウで直接呼び出す低レベル実装** → **2026-07-20 17:33-17:34 実機検証で成功確認済み**（reason=7でlocked、reason=8でactiveに正しく切り替わり、ロック中も安定して保持された）
 
-**3方式目(SystemEvents.SessionSwitch)も実機検証NG**（2026-07-20 16:43-16:56、購読成功だがeventCount=0のまま、イベントが一切届かなかった）。
-
-**4方式目に転換済み（未検証）**: `WTSRegisterSessionNotification`を自前の非表示WinFormsウィンドウで直接呼び出す低レベル実装（`WorkdayCollector.LockWatcher`）。.NETのSystemEventsに任せず、OSへの登録とメッセージ受信を自前で行う。Linux環境ではWindows専用APIのため実行検証ができず、C#コードの手動レビュー(括弧対応・型整合性)までしか確認できていない。
-
-**次の担当AIが最初にやること**: Shotaに最新版取得(ZIP再ダウンロード→上書きコピー、gitではない)→`collector/diagnose-lock.ps1`再実行を依頼し、結果（特に「WTSRegisterSessionNotification自体の成否」表示と`cnt`列）を見て判断すること。詳細はworkday-rpa/SKILL.mdの「未解決課題」参照。これでもダメなら次善策は`quser.exe`のテキスト解析。
+**教訓**: この企業PC環境では、.NETの高レベルAPI（SystemEvents等）に任せる方式が2回とも機能しなかった。低レベルAPIを自前で直接呼ぶ実装のみが機能した。詳細はworkday-rpa/SKILL.md参照。
 
 ## 現在地
 
-- **Phase 1 (Collector): 実機検証中、ロック検知3回目の修正が検証待ちのためGoはまだ**
-  - スタンバイ除外✅ / 多重起動ガード✅
-  - ロック検知: 上記参照。3回目の修正(イベント購読方式)が未検証
-  - Excelロック中の記録消失→メモリバックログ方式で修正済み(コミット 11db66e)。**この修正版の実機確認がまだ**（15:48/49のwrite failedログは修正"前"の古いプロセスのものなので参考にならない。改めてExcelで開いたまま数分放置するテストが必要）
+- **Phase 1 (Collector): ロック検知は解決。残りの検証項目をクリアすればGo**
+  - スタンバイ除外✅ / 多重起動ガード✅ / ロック検知✅（上記参照、2026-07-20確認済み）
+  - Excelロック中の記録消失→メモリバックログ方式で修正済み(コミット 11db66e)。**この修正版の実機確認がまだ**（Excelで開いたまま数分放置するテストが必要）
   - 「再起動後の自動再開」も実機未検証
+  - **次にやること**: Shotaに最新版取得→`install.ps1`再実行（常駐版にロック検知修正を反映）→一晩の通常使用検証（スタンバイギャップ・ロック記録・Excel耐性・再起動後の自動再開）を依頼し、CSVとログを確認する。問題なければPhase 1をGo宣言してmainマージ、Phase 2（Planner）へ
   - Shotaの取得方法はZIPダウンロードの上書きコピー運用（`.git`なし）。`git pull`は使えないので、都度ZIP再取得＋上書きコピーで案内すること
 - **Phase 2 (Planner): 着手直後**。`app/src/lib/` に集計・休憩ルールの純粋ロジック＋テストを置いた（このコミット参照）。CLI(plan.js)・preview.html生成・PTO対応は未実装
 - Phase 3 (Injector) / Phase 4 (Reporter): 未着手。設計はDESIGN.md確定済み（承認①取得済み）
