@@ -38,18 +38,27 @@ $dataDir = $config.DataDir
 if (-not [System.IO.Path]::IsPathRooted($dataDir)) { $dataDir = Join-Path $repoRoot $dataDir }
 
 # --- 2. スタートアップ登録 ---
-# ショートカットの TargetPath は run-collector.vbs 自身とし、Arguments は空にする。
-# ショートカット(.lnk)のArgumentsフィールドは非Unicode(ANSI)コードページで
-# 保存される既知の制限があり、OneDriveパス中の日本語文字が「?」に化けて
-# 起動失敗する不具合が実機で発生したため(2026-07-20)。TargetPathフィールドは
-# この問題の影響を受けないため、日本語パスを渡す必要がある処理は
-# run-collector.vbs 側の自己位置検出(WScript.ScriptFullName)に任せる。
+# TargetPathをrun-collector.vbs自身にすると、WshShortcut.TargetPathが
+# "Value does not fall within the expected range"で失敗した(実機確認、
+# 2026-07-20)。WshShortcutのTargetPathは実行可能ファイル(.exe等)のみを
+# 受け付けると見られるため、TargetPathは検証済みのwscript.exeに戻す。
+# Argumentsに日本語パスをそのまま渡すと、.lnkのArgumentsフィールドが
+# 非Unicode(ANSI)コードページで保存される既知の制限により文字が「?」に
+# 化けて起動失敗する不具合も実機で確認済み(2026-07-20)。
+# 対策として、8.3短縮パス(常にASCIIのみ)をArgumentsに使う。
+$fso = New-Object -ComObject Scripting.FileSystemObject
+$launcherVbsShort = $fso.GetFile($launcherVbs).ShortPath
+if ($launcherVbsShort -match '[^\x00-\x7F]') {
+    Write-Warning ('8.3短縮パスの取得に失敗した可能性があります(非ASCII文字が残存): {0}' -f $launcherVbsShort)
+    Write-Warning 'この場合スタートアップからの自動起動が失敗する可能性があります(ボリュームの8.3名生成が無効化されていないか要確認)。'
+}
+
 $startupDir = [Environment]::GetFolderPath('Startup')
 $lnkPath = Join-Path $startupDir 'WorkdayCollector.lnk'
 $shell = New-Object -ComObject WScript.Shell
 $shortcut = $shell.CreateShortcut($lnkPath)
-$shortcut.TargetPath = $launcherVbs
-$shortcut.Arguments = ''
+$shortcut.TargetPath = (Join-Path $env:WINDIR 'System32\wscript.exe')
+$shortcut.Arguments = ('"{0}"' -f $launcherVbsShort)
 $shortcut.Description = 'Workday勤怠ツール: PC稼働時間レコーダー'
 $shortcut.Save()
 Write-Host "スタートアップに登録しました: $lnkPath"

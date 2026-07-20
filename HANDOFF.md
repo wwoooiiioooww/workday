@@ -16,7 +16,7 @@
 
 2026-07-20、再起動後に「Windows Script Host」のエラーダイアログが発生し、ハートビートが更新されなくなった。原因はスタートアップフォルダの.lnkショートカットの`Arguments`フィールドが非Unicode(ANSI)コードページで保存される既知の制限で、OneDriveパス中の「005_AIツール」が「005_AI???」に化けて起動失敗していた。詳細・対策はworkday-rpa/SKILL.md参照。
 
-修正: `run-collector.vbs`が`WScript.ScriptFullName`で自己位置を検出し`collector.ps1`を自動発見する方式に変更、`install.ps1`のショートカットは`TargetPath=run-collector.vbs`・`Arguments=''`(空)にした。**この修正はまだ実機未検証**（Linux環境では.lnk生成・VBScript実行そのものを検証できない）。
+1回目の修正(`TargetPath=run-collector.vbs`・`Arguments=''`)は別のエラー(`WshShortcut.TargetPath`は実行可能ファイルしか受け付けず`ArgumentException`)で失敗した。**確定した最終対策**: TargetPathは`wscript.exe`(検証済み)に戻し、Argumentsには8.3短縮パス(常にASCII)を使う方式に変更(コミット参照)。`run-collector.vbs`自体は`WScript.ScriptFullName`で自己位置検出し`collector.ps1`を自動発見する仕様のまま。**この修正もまだ実機未検証**（Linux環境では.lnk生成・VBScript実行そのものを検証できない）。
 
 ## 現在地
 
