@@ -213,25 +213,39 @@ function Get-SessionState {
 # StateHolder はイベントコールバック(別スレッドで実行される)とメインループの
 # 間で状態を共有するための Hashtable。文字列の代入/参照は原子的なので
 # 追加のロックは不要。
+# 戻り値: 購読に成功したら $true、例外が出た場合は $false（呼び出し元でエラー内容を確認できるよう
+# 例外は握りつぶさずWrite-Warningで表示する）。
+# StateHolder には診断用に eventCount(発火回数) / lastReason(直近のReason文字列) も入る。
+# これにより「イベントが一度も来ていない」のか「来ているが判定条件に合っていない」のかを区別できる。
 function Register-SessionSwitchTracking {
     param(
         [Parameter(Mandatory = $true)][hashtable]$StateHolder,
         [string]$SourceIdentifier = 'WorkdayCollectorSessionSwitch'
     )
-    Add-Type -AssemblyName System
     if (-not $StateHolder.ContainsKey('state')) { $StateHolder['state'] = 'active' }
+    $StateHolder['eventCount'] = 0
+    $StateHolder['lastReason'] = '(none)'
 
     Unregister-SessionSwitchTracking -SourceIdentifier $SourceIdentifier
 
-    Register-ObjectEvent -InputObject ([Microsoft.Win32.SystemEvents]) -EventName 'SessionSwitch' `
-        -SourceIdentifier $SourceIdentifier -MessageData $StateHolder -Action {
-            $reason = $Event.SourceEventArgs.Reason
-            if ($reason -eq [Microsoft.Win32.SessionSwitchReason]::SessionLock) {
-                $Event.MessageData['state'] = 'locked'
-            } elseif ($reason -eq [Microsoft.Win32.SessionSwitchReason]::SessionUnlock) {
-                $Event.MessageData['state'] = 'active'
-            }
-        } | Out-Null
+    try {
+        Add-Type -AssemblyName System
+        Register-ObjectEvent -InputObject ([Microsoft.Win32.SystemEvents]) -EventName 'SessionSwitch' `
+            -SourceIdentifier $SourceIdentifier -MessageData $StateHolder -Action {
+                $reason = $Event.SourceEventArgs.Reason
+                $Event.MessageData['eventCount'] = [int]$Event.MessageData['eventCount'] + 1
+                $Event.MessageData['lastReason'] = [string]$reason
+                if ($reason -eq [Microsoft.Win32.SessionSwitchReason]::SessionLock) {
+                    $Event.MessageData['state'] = 'locked'
+                } elseif ($reason -eq [Microsoft.Win32.SessionSwitchReason]::SessionUnlock) {
+                    $Event.MessageData['state'] = 'active'
+                }
+            } -ErrorAction Stop | Out-Null
+        return $true
+    } catch {
+        Write-Warning ('SessionSwitchイベントの購読に失敗しました: {0}' -f $_.Exception.Message)
+        return $false
+    }
 }
 
 function Unregister-SessionSwitchTracking {

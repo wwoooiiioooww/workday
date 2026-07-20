@@ -21,7 +21,9 @@ description: Workday勤怠自動入力プロジェクト固有の知見。PC稼�
   - **採用した本番方式: `SystemEvents.SessionSwitch`イベント購読**（`Register-SessionSwitchTracking`関数）。winlogonが`WM_WTSSESSION_CHANGE`をブロードキャストする際の一次通知を直接受け取るため、「どのセッションを見るか」を自分で選ぶ必要がなく、セッションID取り違えの影響を受けない。.NETの`SystemEvents`は初回購読時に専用スレッド＋メッセージポンプを自動生成するため、PowerShellコンソールの常駐スクリプトでも`Application.Run`等を呼ばずにそのまま使える。
   - 制約: 起動直後、初回のLock/Unlockイベントを受け取るまでは`active`固定（通常はアクティブ使用中にインストールされるため実害は小さい想定）。
   - `Get-SessionState`（ポーリング方式）は本番判定からは外したが、`collector/diagnose-lock.ps1`の比較表示用に残してある。
-  - **この修正の実機検証はまだ**。次の担当AIは、Shotaに`diagnose-lock.ps1`を再実行してもらい、「event(本番)」列がロック/解除に正しく追従するか確認すること。
+  - ⚠️ **この方式もまだ動いていない（2026-07-20実機で確認）**: `event(本番)`列が20サンプル中1度も`locked`に反応せず、常に`active`固定だった。イベントが届いていないのか、届いているが判定条件が合っていないのか未特定。
+  - **診断強化済み**: `Register-SessionSwitchTracking`にeventCount/lastReasonのトラッキングと購読失敗時の`Write-Warning`を追加。`diagnose-lock.ps1`は購読成功可否・発火回数(cnt)・直近のReason文字列・アクション実行時エラー(`Get-Job | Receive-Job`)まで表示するようにした。次の担当AIは、この強化版の結果を見て「イベントが全く届いていない(cnt=0のまま)」のか「届いているが条件不一致(cntは増えるがevent列がactiveのまま)」のかで原因の当たりをつけること。
+  - もしこの方式も実機で機能しないと判明した場合の次の一手（未着手）: `quser.exe`/`query session`の定期実行によるテキスト解析（日本語ロケール依存の脆さに注意）、またはWTS_CURRENT_SERVER_HANDLEを明示的に渡す形でのWTSQuerySessionInformation再挑戦（現状は`IntPtr.Zero`=ローカルサーバーを渡しているが、企業PC環境特有の何かでこれが期待通りに解決されていない可能性がある）。
 - 集計側は「ハートビート間隔を大きく超えるギャップ＝PCオフ」と機械判定する（閾値はインターバルの2.5倍を目安）。
 - 多重起動ガードは名前付きmutex `Local\WorkdayCollectorMutex`。
 - **CSVをExcelで開くと排他ロックで追記が失敗する**（2026-07-20実機で2分分の記録消失が発生）。対策として書けなかった行はメモリのバックログに保持し、書けるようになったら遡って追記する（`Write-HeartbeatBacklog`）。ユーザーには「確認はコピーを開くか、開いたら閉じておく」を案内しつつ、開きっぱなしでも記録は失われない設計とする。

@@ -25,10 +25,22 @@ Write-Host ' ロック→数秒待つ→解除、の順で試すと分かりや�
 Write-Host ''
 
 $eventState = @{ state = 'active' }
-Register-SessionSwitchTracking -StateHolder $eventState -SourceIdentifier 'WorkdayDiagnoseSessionSwitch'
+$sourceId = 'WorkdayDiagnoseSessionSwitch'
+$registered = Register-SessionSwitchTracking -StateHolder $eventState -SourceIdentifier $sourceId
+if ($registered) {
+    $sub = Get-EventSubscriber -SourceIdentifier $sourceId -ErrorAction SilentlyContinue
+    if ($sub) {
+        Write-Host ('✅ イベント購読: 成功 (SubscriptionId={0})' -f $sub.SubscriptionId) -ForegroundColor Green
+    } else {
+        Write-Host '⚠️ Register-SessionSwitchTrackingはエラーなしで返ったが、購読が見つからない' -ForegroundColor Yellow
+    }
+} else {
+    Write-Host '❌ イベント購読に失敗しました（上の警告メッセージを確認してください）' -ForegroundColor Red
+}
+Write-Host ''
 
-Write-Host 'time     | wtsOk sid  level flags | oidResult | event(本番) | 旧最終判定'
-Write-Host '---------|-------------------------|-----------|-------------|----------'
+Write-Host 'time     | wtsOk sid  level flags | oidResult | event(本番) cnt reason        | 旧最終判定'
+Write-Host '---------|-------------------------|-----------|--------------------------------------|----------'
 
 $WTSSessionInfoEx = 25
 
@@ -63,13 +75,20 @@ for ($i = 0; $i -lt 20; $i++) {
 
     $judged = Get-SessionState
 
-    Write-Host ('{0} | {1,5} {2,4} {3,5} {4,5} | {5,-9} | {6,-11} | {7}' -f `
-        (Get-Date -Format 'HH:mm:ss'), $wtsOk, $sid, $level, $flags, $oidResult, $eventState['state'], $judged)
+    Write-Host ('{0} | {1,5} {2,4} {3,5} {4,5} | {5,-9} | {6,-11} {7,3} {8,-12} | {9}' -f `
+        (Get-Date -Format 'HH:mm:ss'), $wtsOk, $sid, $level, $flags, $oidResult, `
+        $eventState['state'], $eventState['eventCount'], $eventState['lastReason'], $judged)
 
     Start-Sleep -Seconds 1
 }
 
-Unregister-SessionSwitchTracking -SourceIdentifier 'WorkdayDiagnoseSessionSwitch'
+Write-Host ''
+Write-Host '--- イベントアクション実行中のエラー(あれば。何も出なければエラーなし) ---'
+Get-Job -Name $sourceId -ErrorAction SilentlyContinue | Receive-Job -Keep -ErrorAction SilentlyContinue
+
+Unregister-SessionSwitchTracking -SourceIdentifier $sourceId
 
 Write-Host ''
-Write-Host 'この表をそのままコピーしてAIに貼ってください。「event(本番)」列がロック/解除にきちんと追従していればOKです。'
+Write-Host 'この表と、上の購読結果・エラー表示をそのままコピーしてAIに貼ってください。'
+Write-Host '「cnt」が0のまま増えない場合はイベントが一度も届いていません。'
+Write-Host '「cnt」が増えているのに「event(本番)」がactiveのままの場合はreasonの判定条件が合っていません。'

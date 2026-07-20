@@ -9,7 +9,7 @@
 2. `WTSQuerySessionInformation` → 逆に実際はロックしていないのに`locked`固定になるバグ（診断スクリプトでflags=0固定を確認。Shotaの企業PC環境ではセッションIDベースのポーリングAPIが2つとも信頼できないと判断）
 3. **`SystemEvents.SessionSwitch`イベント購読に方式転換**（OSの一次通知を直接受け取るためセッションID取り違えの影響を受けない）。詳細はworkday-rpa/SKILL.md参照
 
-**この3方式目はまだ実機検証していない**。Shotaに最新版を取得→`collector/diagnose-lock.ps1`を再実行してもらい、表の「event(本番)」列がロック/解除に正しく追従するか確認すること。OKなら`install.ps1`で常駐版も入れ替えて一晩検証へ。
+**この3方式目も実機検証NG**（2026-07-20 16:43-16:44、event列が20サンプル中一度もlockedに反応せずactive固定）。診断を強化した版（購読成功可否・発火回数cnt・直近reason・アクション実行時エラーまで表示）をpush済みだが、**まだこの強化版の実行結果を見ていない**。Shotaに最新版取得→`diagnose-lock.ps1`再実行を依頼し、その結果（特にcntが増えているかどうか）を見てから次の一手を判断すること。詳細はworkday-rpa/SKILL.mdの「未解決課題」参照。
 
 ## 現在地
 
