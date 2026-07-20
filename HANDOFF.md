@@ -9,7 +9,11 @@
 2. `WTSQuerySessionInformation` → 逆に実際はロックしていないのに`locked`固定になるバグ（診断スクリプトでflags=0固定を確認。Shotaの企業PC環境ではセッションIDベースのポーリングAPIが2つとも信頼できないと判断）
 3. **`SystemEvents.SessionSwitch`イベント購読に方式転換**（OSの一次通知を直接受け取るためセッションID取り違えの影響を受けない）。詳細はworkday-rpa/SKILL.md参照
 
-**この3方式目も実機検証NG**（2026-07-20 16:43-16:44、event列が20サンプル中一度もlockedに反応せずactive固定）。診断を強化した版（購読成功可否・発火回数cnt・直近reason・アクション実行時エラーまで表示）をpush済みだが、**まだこの強化版の実行結果を見ていない**。Shotaに最新版取得→`diagnose-lock.ps1`再実行を依頼し、その結果（特にcntが増えているかどうか）を見てから次の一手を判断すること。詳細はworkday-rpa/SKILL.mdの「未解決課題」参照。
+**3方式目(SystemEvents.SessionSwitch)も実機検証NG**（2026-07-20 16:43-16:56、購読成功だがeventCount=0のまま、イベントが一切届かなかった）。
+
+**4方式目に転換済み（未検証）**: `WTSRegisterSessionNotification`を自前の非表示WinFormsウィンドウで直接呼び出す低レベル実装（`WorkdayCollector.LockWatcher`）。.NETのSystemEventsに任せず、OSへの登録とメッセージ受信を自前で行う。Linux環境ではWindows専用APIのため実行検証ができず、C#コードの手動レビュー(括弧対応・型整合性)までしか確認できていない。
+
+**次の担当AIが最初にやること**: Shotaに最新版取得(ZIP再ダウンロード→上書きコピー、gitではない)→`collector/diagnose-lock.ps1`再実行を依頼し、結果（特に「WTSRegisterSessionNotification自体の成否」表示と`cnt`列）を見て判断すること。詳細はworkday-rpa/SKILL.mdの「未解決課題」参照。これでもダメなら次善策は`quser.exe`のテキスト解析。
 
 ## 現在地
 

@@ -5,7 +5,8 @@ Collector の関数ライブラリ。collector.ps1 / install.ps1 / tests.ps1 か
 
 .NOTES
 - 純粋関数（Get-HeartbeatFilePath 等）は Linux の pwsh でもテスト可能。
-- Windows API に依存する関数は Get-SessionState / Stop-CollectorProcess のみ。
+- Windows API に依存する関数（Get-SessionState / Stop-CollectorProcess / ロック監視関連）は
+  Windows実機でのみ動作確認できる。Linux環境では構文チェックまでしか検証できない。
 #>
 
 # 設定読み込み。config.json が無い/壊れている場合はデフォルトで動く（記録が止まる方が害が大きい）。
@@ -198,59 +199,156 @@ function Get-SessionState {
     }
 }
 
-# --- 本番判定: OSのロック/アンロック通知イベントを購読する方式 ---
+# --- 本番判定: 自前の非表示ウィンドウでロック/アンロック通知を直接受信する方式 ---
 #
-# 上記のポーリングAPI(WTSQuerySessionInformation/OpenInputDesktop)は
-# セッションIDの取り違え等の影響を受けるが、SystemEvents.SessionSwitch は
-# winlogon が WM_WTSSESSION_CHANGE をブロードキャストした際にOS自身が発する
-# 一次通知であり、「どのセッションを見るか」を自分で選ぶ必要がないため
-# セッション判定のずれの影響を受けない。
+# 経緯: SystemEvents.SessionSwitchを購読する方式(.NET任せ)は、購読自体は成功する
+# ものの実機で一度もイベントが届かなかった(2026-07-20 Shota実機診断、eventCount=0固定)。
+# .NETのSystemEventsは内部で隠しウィンドウを自動生成するが、コンソールホスト
+# プロセスではこの内部実装が期待通りに機能しないケースが知られている。
 #
-# .NETのSystemEventsは初回購読時に専用の隠しウィンドウ+メッセージポンプを
-# 自前のスレッドに自動生成するため、PowerShellコンソール/常駐スクリプトの
-# ような非UIプロセスでも Application.Run 等を呼ばずにそのまま使える。
+# 対策: .NETに任せず、自分で非表示ウィンドウを作り WTSRegisterSessionNotification で
+# 明示的に「このウィンドウにセッション変更通知(WM_WTSSESSION_CHANGE)を送ってください」と
+# OSに登録する。これはロック検知ツールで広く使われる標準的な低レベル実装で、
+# SystemEventsが内部で本来行うべき処理を自前で確実に行う。
 #
-# StateHolder はイベントコールバック(別スレッドで実行される)とメインループの
-# 間で状態を共有するための Hashtable。文字列の代入/参照は原子的なので
-# 追加のロックは不要。
-# 戻り値: 購読に成功したら $true、例外が出た場合は $false（呼び出し元でエラー内容を確認できるよう
-# 例外は握りつぶさずWrite-Warningで表示する）。
-# StateHolder には診断用に eventCount(発火回数) / lastReason(直近のReason文字列) も入る。
-# これにより「イベントが一度も来ていない」のか「来ているが判定条件に合っていない」のかを区別できる。
+# 専用のSTAスレッド上でWinFormsの非表示Formを1つ作り、Application.Run()で
+# メッセージポンプを回し続ける。WndProcでWM_WTSSESSION_CHANGEを直接受信する。
+function Initialize-LockWatcherType {
+    if (-not ('WorkdayCollector.LockWatcher' -as [type])) {
+        Add-Type -ReferencedAssemblies 'System.Windows.Forms', 'System.Drawing' -Language CSharp -TypeDefinition @'
+using System;
+using System.Collections;
+using System.Runtime.InteropServices;
+using System.Threading;
+using System.Windows.Forms;
+
+namespace WorkdayCollector
+{
+    public class LockWatcher
+    {
+        private const int NOTIFY_FOR_THIS_SESSION = 0;
+        private const int WM_WTSSESSION_CHANGE = 0x02B1;
+        private const int WTS_SESSION_LOCK = 0x7;
+        private const int WTS_SESSION_UNLOCK = 0x8;
+
+        [DllImport("wtsapi32.dll", SetLastError = true)]
+        private static extern bool WTSRegisterSessionNotification(IntPtr hWnd, int dwFlags);
+        [DllImport("wtsapi32.dll", SetLastError = true)]
+        private static extern bool WTSUnRegisterSessionNotification(IntPtr hWnd);
+
+        private class HiddenForm : Form
+        {
+            public LockWatcher Watcher;
+            protected override void OnHandleCreated(EventArgs e)
+            {
+                base.OnHandleCreated(e);
+                bool ok = WTSRegisterSessionNotification(this.Handle, NOTIFY_FOR_THIS_SESSION);
+                if (Watcher != null) Watcher.NotifyRegistered(ok);
+            }
+            protected override void OnHandleDestroyed(EventArgs e)
+            {
+                try { WTSUnRegisterSessionNotification(this.Handle); } catch { }
+                base.OnHandleDestroyed(e);
+            }
+            protected override void WndProc(ref Message m)
+            {
+                if (m.Msg == WM_WTSSESSION_CHANGE && Watcher != null)
+                {
+                    Watcher.OnSessionChange(m.WParam.ToInt32());
+                }
+                base.WndProc(ref m);
+            }
+        }
+
+        private Thread _thread;
+        private HiddenForm _form;
+        private Hashtable _stateHolder;
+
+        public void Start(Hashtable stateHolder)
+        {
+            _stateHolder = stateHolder;
+            _stateHolder["state"] = "active";
+            _stateHolder["eventCount"] = 0;
+            _stateHolder["lastReason"] = "(none)";
+            _stateHolder["wtsRegisterOk"] = "(pending)";
+
+            _thread = new Thread(() =>
+            {
+                _form = new HiddenForm();
+                _form.Watcher = this;
+                _form.ShowInTaskbar = false;
+                IntPtr h = _form.Handle; // ハンドル生成を強制(表示はしない)
+                Application.Run();
+            });
+            _thread.IsBackground = true;
+            _thread.SetApartmentState(ApartmentState.STA);
+            _thread.Start();
+
+            for (int i = 0; i < 20 && (_form == null || !_form.IsHandleCreated); i++)
+            {
+                Thread.Sleep(100);
+            }
+        }
+
+        private void NotifyRegistered(bool ok)
+        {
+            if (_stateHolder != null) _stateHolder["wtsRegisterOk"] = ok.ToString();
+        }
+
+        private void OnSessionChange(int reason)
+        {
+            if (_stateHolder == null) return;
+            _stateHolder["eventCount"] = ((int)_stateHolder["eventCount"]) + 1;
+            _stateHolder["lastReason"] = reason.ToString();
+            if (reason == WTS_SESSION_LOCK) _stateHolder["state"] = "locked";
+            else if (reason == WTS_SESSION_UNLOCK) _stateHolder["state"] = "active";
+        }
+
+        public void Stop()
+        {
+            if (_form != null && _form.IsHandleCreated)
+            {
+                try { _form.Invoke(new Action(() => Application.ExitThread())); } catch { }
+            }
+            if (_thread != null) _thread.Join(2000);
+        }
+    }
+}
+'@
+    }
+}
+
+# StateHolder はウィンドウのメッセージスレッド(別スレッド)とメインループの間で
+# 状態を共有するための Hashtable。文字列/整数の代入・参照は原子的なので追加のロックは不要。
+# 戻り値: 初期化に成功したら $true、例外時は $false（Write-Warningで詳細表示）。
+# StateHolder には診断用に eventCount(発火回数) / lastReason(直近のイベント種別番号) /
+# wtsRegisterOk(WTSRegisterSessionNotification自体の成否) も入る。
+$script:LockWatchers = @{}
+
 function Register-SessionSwitchTracking {
     param(
         [Parameter(Mandatory = $true)][hashtable]$StateHolder,
         [string]$SourceIdentifier = 'WorkdayCollectorSessionSwitch'
     )
-    if (-not $StateHolder.ContainsKey('state')) { $StateHolder['state'] = 'active' }
-    $StateHolder['eventCount'] = 0
-    $StateHolder['lastReason'] = '(none)'
-
     Unregister-SessionSwitchTracking -SourceIdentifier $SourceIdentifier
-
     try {
-        Add-Type -AssemblyName System
-        Register-ObjectEvent -InputObject ([Microsoft.Win32.SystemEvents]) -EventName 'SessionSwitch' `
-            -SourceIdentifier $SourceIdentifier -MessageData $StateHolder -Action {
-                $reason = $Event.SourceEventArgs.Reason
-                $Event.MessageData['eventCount'] = [int]$Event.MessageData['eventCount'] + 1
-                $Event.MessageData['lastReason'] = [string]$reason
-                if ($reason -eq [Microsoft.Win32.SessionSwitchReason]::SessionLock) {
-                    $Event.MessageData['state'] = 'locked'
-                } elseif ($reason -eq [Microsoft.Win32.SessionSwitchReason]::SessionUnlock) {
-                    $Event.MessageData['state'] = 'active'
-                }
-            } -ErrorAction Stop | Out-Null
+        Initialize-LockWatcherType
+        $watcher = New-Object WorkdayCollector.LockWatcher
+        $watcher.Start($StateHolder)
+        $script:LockWatchers[$SourceIdentifier] = $watcher
         return $true
     } catch {
-        Write-Warning ('SessionSwitchイベントの購読に失敗しました: {0}' -f $_.Exception.Message)
+        Write-Warning ('ロック監視ウィンドウの初期化に失敗しました: {0}' -f $_.Exception.Message)
         return $false
     }
 }
 
 function Unregister-SessionSwitchTracking {
     param([string]$SourceIdentifier = 'WorkdayCollectorSessionSwitch')
-    Get-EventSubscriber -SourceIdentifier $SourceIdentifier -ErrorAction SilentlyContinue | Unregister-Event
+    if ($script:LockWatchers -and $script:LockWatchers.ContainsKey($SourceIdentifier)) {
+        try { $script:LockWatchers[$SourceIdentifier].Stop() } catch { }
+        $script:LockWatchers.Remove($SourceIdentifier)
+    }
 }
 
 # 実行中の collector.ps1 プロセスを停止する（install/uninstall用）。停止した数を返す。
