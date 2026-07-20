@@ -19,7 +19,6 @@ $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 . (Join-Path $scriptDir 'collector-lib.ps1')
 
 $repoRoot = Split-Path -Parent $scriptDir
-$collectorPs1 = Join-Path $scriptDir 'collector.ps1'
 $launcherVbs = Join-Path $scriptDir 'run-collector.vbs'
 
 Write-Host '=================================================' -ForegroundColor Green
@@ -39,13 +38,18 @@ $dataDir = $config.DataDir
 if (-not [System.IO.Path]::IsPathRooted($dataDir)) { $dataDir = Join-Path $repoRoot $dataDir }
 
 # --- 2. スタートアップ登録 ---
+# ショートカットの TargetPath は run-collector.vbs 自身とし、Arguments は空にする。
+# ショートカット(.lnk)のArgumentsフィールドは非Unicode(ANSI)コードページで
+# 保存される既知の制限があり、OneDriveパス中の日本語文字が「?」に化けて
+# 起動失敗する不具合が実機で発生したため(2026-07-20)。TargetPathフィールドは
+# この問題の影響を受けないため、日本語パスを渡す必要がある処理は
+# run-collector.vbs 側の自己位置検出(WScript.ScriptFullName)に任せる。
 $startupDir = [Environment]::GetFolderPath('Startup')
 $lnkPath = Join-Path $startupDir 'WorkdayCollector.lnk'
 $shell = New-Object -ComObject WScript.Shell
 $shortcut = $shell.CreateShortcut($lnkPath)
-$shortcut.TargetPath = (Join-Path $env:WINDIR 'System32\wscript.exe')
-$shortcut.Arguments = ('"{0}" "{1}"' -f $launcherVbs, $collectorPs1)
-$shortcut.WorkingDirectory = $scriptDir
+$shortcut.TargetPath = $launcherVbs
+$shortcut.Arguments = ''
 $shortcut.Description = 'Workday勤怠ツール: PC稼働時間レコーダー'
 $shortcut.Save()
 Write-Host "スタートアップに登録しました: $lnkPath"
@@ -53,7 +57,7 @@ Write-Host "スタートアップに登録しました: $lnkPath"
 # --- 3. 既存プロセス停止 → 即時起動 ---
 $stopped = Stop-CollectorProcess
 if ($stopped -gt 0) { Write-Host "既存の collector プロセス $stopped 件を停止しました" }
-Start-Process -FilePath (Join-Path $env:WINDIR 'System32\wscript.exe') -ArgumentList ('"{0}" "{1}"' -f $launcherVbs, $collectorPs1)
+Start-Process -FilePath (Join-Path $env:WINDIR 'System32\wscript.exe') -ArgumentList ('"{0}"' -f $launcherVbs)
 Write-Host 'collector を起動しました（非表示）'
 
 # --- 4. 起動確認: ハートビートが書かれるまで最大90秒待つ ---

@@ -12,13 +12,18 @@
 
 **教訓**: この企業PC環境では、.NETの高レベルAPI（SystemEvents等）に任せる方式が2回とも機能しなかった。低レベルAPIを自前で直接呼ぶ実装のみが機能した。詳細はworkday-rpa/SKILL.md参照。
 
+## ✅ 再起動後に自動起動しないバグも解決済み（.lnk Arguments日本語パス問題）
+
+2026-07-20、再起動後に「Windows Script Host」のエラーダイアログが発生し、ハートビートが更新されなくなった。原因はスタートアップフォルダの.lnkショートカットの`Arguments`フィールドが非Unicode(ANSI)コードページで保存される既知の制限で、OneDriveパス中の「005_AIツール」が「005_AI???」に化けて起動失敗していた。詳細・対策はworkday-rpa/SKILL.md参照。
+
+修正: `run-collector.vbs`が`WScript.ScriptFullName`で自己位置を検出し`collector.ps1`を自動発見する方式に変更、`install.ps1`のショートカットは`TargetPath=run-collector.vbs`・`Arguments=''`(空)にした。**この修正はまだ実機未検証**（Linux環境では.lnk生成・VBScript実行そのものを検証できない）。
+
 ## 現在地
 
-- **Phase 1 (Collector): ロック検知は解決。残りの検証項目をクリアすればGo**
-  - スタンバイ除外✅ / 多重起動ガード✅ / ロック検知✅（上記参照、2026-07-20確認済み）
-  - Excelロック中の記録消失→メモリバックログ方式で修正済み(コミット 11db66e)。**この修正版の実機確認がまだ**（Excelで開いたまま数分放置するテストが必要）
-  - 「再起動後の自動再開」も実機未検証
-  - **次にやること**: Shotaに最新版取得→`install.ps1`再実行（常駐版にロック検知修正を反映）→一晩の通常使用検証（スタンバイギャップ・ロック記録・Excel耐性・再起動後の自動再開）を依頼し、CSVとログを確認する。問題なければPhase 1をGo宣言してmainマージ、Phase 2（Planner）へ
+- **Phase 1 (Collector): 主要バグは全て対処済み。実機での再起動を跨いだ最終検証待ち**
+  - スタンバイ除外✅ / 多重起動ガード✅ / ロック検知✅ / Excelロック中の記録消失対策✅(コミット11db66e、実機確認はまだ)
+  - 再起動後の自動起動: 上記の.lnk Arguments日本語パス問題を修正済みだが**未検証**
+  - **次にやること**: Shotaに最新版取得→`install.ps1`再実行→**PCを実際に再起動**→自動起動するか確認、を依頼する。これがクリアできれば残りは一晩の通常使用検証(スタンバイギャップ・ロック記録・Excel耐性)のみ。問題なければPhase 1をGo宣言してmainマージ、Phase 2（Planner）へ
   - Shotaの取得方法はZIPダウンロードの上書きコピー運用（`.git`なし）。`git pull`は使えないので、都度ZIP再取得＋上書きコピーで案内すること
 - **Phase 2 (Planner): 着手直後**。`app/src/lib/` に集計・休憩ルールの純粋ロジック＋テストを置いた（このコミット参照）。CLI(plan.js)・preview.html生成・PTO対応は未実装
 - Phase 3 (Injector) / Phase 4 (Reporter): 未着手。設計はDESIGN.md確定済み（承認①取得済み）

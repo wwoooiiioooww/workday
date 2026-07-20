@@ -12,6 +12,8 @@ description: Workday勤怠自動入力プロジェクト固有の知見。PC稼�
 - **日本語コメント入りの .ps1 は UTF-8 BOM 付きで保存する**: BOMなしだと PS 5.1 が ANSI と解釈して文字化け・パースエラーを起こす。コミット前に `head -c 3 file.ps1 | xxd` で `efbbbf` を確認。
 - **VBScript ファイルは ASCII のみ**: VBSはUTF-8を解釈しない。コメントも英語で書く。
 - **コンソール窓のフラッシュ回避**: 常駐PSの起動は `wscript.exe run-collector.vbs` 経由（`-WindowStyle Hidden` 単独では起動瞬間に窓が出る）。
+- **⚠️ ショートカット(.lnk)のArgumentsフィールドに日本語パスを入れてはいけない**（2026-07-20実機で発覚）: `WScript.Shell`の`CreateShortcut`/`Save()`で作る.lnkファイルは、`Arguments`(および恐らく`WorkingDirectory`)フィールドを非Unicode(システムのANSIコードページ)で保存する既知の制限がある。OneDriveの「005_AIツール」のような日本語フォルダ名がArgumentsに入っていると、コードページの解決に失敗し文字が「?」に化けて起動失敗する（エラー例: `Loading script "...005_AI???...\run-collector.vbs" failed`）。**`TargetPath`フィールドはこの問題の影響を受けない**(Unicode安全なLinkTargetIDList機構を使う)。対策: ショートカットのTargetPathを実行したいスクリプト自身のパスにし、Argumentsは空にする。日本語パスの解決が必要な処理は、スクリプト自身に`WScript.ScriptFullName`で自己位置を検出させる（`run-collector.vbs`参照）。
+  - この問題は`Start-Process -ArgumentList`（CreateProcessW経由、Unicode安全）では起きない。install.ps1実行直後の即時起動が成功していたのはこのため。**症状が「初回は動くが再起動後だけ失敗する」場合はこの.lnk Arguments問題を疑うこと。**
 
 ## 稼働時間記録の設計原則
 
