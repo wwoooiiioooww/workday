@@ -120,16 +120,55 @@ function Initialize-DesktopProbe {
 public static extern IntPtr OpenInputDesktop(uint dwFlags, bool fInherit, uint dwDesiredAccess);
 [DllImport("user32.dll", SetLastError = true)]
 public static extern bool CloseDesktop(IntPtr hDesktop);
+
+[DllImport("kernel32.dll")]
+public static extern int WTSGetActiveConsoleSessionId();
+
+[DllImport("wtsapi32.dll", SetLastError = true)]
+public static extern bool WTSQuerySessionInformation(IntPtr hServer, int sessionId, int wtsInfoClass, out IntPtr ppBuffer, out int pBytesReturned);
+
+[DllImport("wtsapi32.dll")]
+public static extern void WTSFreeMemory(IntPtr pMemory);
 '@
     }
 }
 
-# セッション状態の判定: ロック中はセキュアデスクトップに切り替わるため
-# OpenInputDesktop(DESKTOP_SWITCHDESKTOP=0x0100) が失敗する。
-# フォールバックとして LogonUI プロセスの存在でも判定する。
+# セッション状態の判定（優先度順）:
+# 1. WTSQuerySessionInformation(WTSSessionInfoEx): Windowsのセッション管理自体が
+#    保持しているロック/アンロックのフラグを直接読む。どのUIが前面に出ているかに
+#    依存しないため最も信頼できる。
+#    (OpenInputDesktopやLogonUIプロセスの有無で判定する方式は、ロック直後は
+#     パスワード入力UIがまだ起動していないため「active」に誤判定することが
+#     実機検証で確認された。)
+# 2. 上記が使えない環境向けのフォールバックとして OpenInputDesktop を残す。
+# 3. すべて失敗した場合は 'active' とみなす（記録が完全に止まるより安全側）。
 function Get-SessionState {
+    Initialize-DesktopProbe
+
+    # WTS_SESSIONSTATE_LOCK = 0, WTS_SESSIONSTATE_UNLOCK = 1
+    $WTSSessionInfoEx = 25
+    $buffer = [IntPtr]::Zero
     try {
-        Initialize-DesktopProbe
+        $sessionId = [WorkdayCollector.DesktopProbe]::WTSGetActiveConsoleSessionId()
+        $bytesReturned = 0
+        $ok = [WorkdayCollector.DesktopProbe]::WTSQuerySessionInformation([IntPtr]::Zero, $sessionId, $WTSSessionInfoEx, [ref]$buffer, [ref]$bytesReturned)
+        if ($ok -and $buffer -ne [IntPtr]::Zero -and $bytesReturned -ge 16) {
+            $level = [System.Runtime.InteropServices.Marshal]::ReadInt32($buffer, 0)
+            if ($level -eq 1) {
+                # WTSINFOEX_LEVEL1_W: Level(4) + SessionId(4) + SessionState(4) + SessionFlags(4) ...
+                $sessionFlags = [System.Runtime.InteropServices.Marshal]::ReadInt32($buffer, 12)
+                if ($sessionFlags -eq 0) { return 'locked' }
+                if ($sessionFlags -eq 1) { return 'active' }
+                # -1(unknown)等の場合は他の判定方法にフォールバック
+            }
+        }
+    } catch {
+        # フォールバックへ
+    } finally {
+        if ($buffer -ne [IntPtr]::Zero) { [WorkdayCollector.DesktopProbe]::WTSFreeMemory($buffer) }
+    }
+
+    try {
         $h = [WorkdayCollector.DesktopProbe]::OpenInputDesktop(0, $false, 0x0100)
         if ($h -ne [IntPtr]::Zero) {
             [void][WorkdayCollector.DesktopProbe]::CloseDesktop($h)

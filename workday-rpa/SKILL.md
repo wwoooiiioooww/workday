@@ -16,7 +16,8 @@ description: Workday勤怠自動入力プロジェクト固有の知見。PC稼�
 ## 稼働時間記録の設計原則
 
 - **ハートビート方式が正**: 「記録がある時間＝PC ON」。イベントログのID網羅で状態を再構成する方式は、現行版(ref/)でスタンバイ除外に失敗した実績があるため採用しない。
-- ロック判定は `OpenInputDesktop(DESKTOP_SWITCHDESKTOP=0x0100)` の失敗＝ロック中。フォールバックは LogonUI プロセスの存在。
+- ロック判定は `WTSQuerySessionInformation(WTSSessionInfoEx)` の `SessionFlags`（0=ロック中/1=解除中）が第一優先。フォールバックは `OpenInputDesktop(DESKTOP_SWITCHDESKTOP=0x0100)`失敗判定、さらにLogonUIプロセスの存在。
+  - **実機検証で判明した罠**: `OpenInputDesktop`/LogonUIプロセスに依存する判定は、ロック直後（パスワード入力欄がまだ表示されていない状態）を`active`と誤判定する。数分程度の短いロックだと1分間隔のポーリングでこの誤判定窓に完全に入ってしまい、ロックが1件も記録されないことがある（2026-07-20 Shota実機検証で発見）。`WTSQuerySessionInformation`はOS自身のセッション状態フラグを直接読むため、どのUIコンポーネントが前面にあるかに依存せず正確。
 - 集計側は「ハートビート間隔を大きく超えるギャップ＝PCオフ」と機械判定する（閾値はインターバルの2.5倍を目安）。
 - 多重起動ガードは名前付きmutex `Local\WorkdayCollectorMutex`。
 
