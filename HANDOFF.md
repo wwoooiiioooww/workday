@@ -34,7 +34,11 @@
   - 多重起動ガード✅
   - **次にやること**: (a) Phase 1をmainにマージするか（outward-facingなのでShotaに確認してから）、(b) Phase 2（Planner）の計画を提示し承認①を得てから実装。CLAUDE.mdの承認ゲートを厳守すること。
   - Shotaの取得方法はZIPダウンロードの上書きコピー運用（`.git`なし）。ただしOneDriveのロックでファイルが更新されないことがあるため、重要な変更は「実行中のファイルが本当に最新か（エラーの行番号が最新版と一致するか）」を確認させること。同期に依存しないインラインのワンショット手順も有効。
-- **Phase 2 (Planner): 着手直後**。`app/src/lib/` に集計・休憩ルールの純粋ロジック＋テストを置いた（このコミット参照）。CLI(plan.js)・preview.html生成・PTO対応は未実装
+- **Phase 2 (Planner): 実装完了（2026-07-21）・Shota実データでの確認待ち**。
+  - `app/src/lib/`: aggregate（集計）/ breaks（休憩ルール）/ blocks（ブロック分割）/ planner（中核オーケストレーション）/ planio（ファイルI/O）/ validate（検査）/ preview（HTML生成）
+  - `app/src/plan.js`: CLI。`node src/plan.js YYYY-MM` で plan.csv + preview.html 生成。`--refresh`（編集尊重で再描画）/ `--validate`（検査）/ `--force`（再集計上書き）
+  - テスト34件全パス。合成データでCLI全経路をE2E確認済み（生成・上書き保護・refresh・validate・PTO除外・force）
+  - **次にやること**: Shotaに実heartbeat（既に数日分ある）で `node src/plan.js 2026-07` を実行してもらい、preview.html の内容が実態と合うか確認。特に、ブロック分割が「均等割り」で実際のギャップ位置に休憩を置いていない点（下記）が実用上問題ないか要フィードバック。
 - Phase 3 (Injector) / Phase 4 (Reporter): 未着手。設計はDESIGN.md確定済み（承認①取得済み）
 
 ## 必読ファイル
