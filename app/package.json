@@ -5,6 +5,11 @@
   "type": "module",
   "description": "Workday勤怠ツールのPlanner/Injector/Reporter (Node.js)",
   "scripts": {
-    "test": "node --test test/*.test.js"
+    "test": "node --test test/*.test.js",
+    "codegen": "playwright codegen --channel=chrome --save-storage=playwright-profile/login-state.json",
+    "inject": "node src/inject.js"
+  },
+  "dependencies": {
+    "playwright": "^1.48.0"
   }
 }
