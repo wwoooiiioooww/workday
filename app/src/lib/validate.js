@@ -37,21 +37,30 @@ export function validatePlanRows(rows, { maxBlockHours = 6 } = {}) {
       issues.push({ level: 'error', date, message: `${line}行目(${date}): 終了理由は「休憩」または「終了」にしてください ("${reason}")。` });
     }
     const s = toMin(start);
-    const e = toMin(end);
-    if (e <= s) {
-      issues.push({ level: 'error', date, message: `${line}行目(${date}): 終了(${end})が開始(${start})以前になっています。` });
+    let e = toMin(end);
+    if (e === s) {
+      issues.push({ level: 'error', date, message: `${line}行目(${date}): 終了(${end})が開始(${start})と同時刻です。` });
       return;
+    }
+    let crossesMidnight = false;
+    if (e < s) {
+      // 現行版(ref/)と同じ解釈: 終了が開始より前の時刻表記は日をまたいだ勤務とみなす。
+      // (例: 21:17開始→翌日00:14終了。エラーにはせず、解釈をwarnで明示する)
+      crossesMidnight = true;
+      e += 24 * 60;
+      issues.push({ level: 'warn', date, message: `${line}行目(${date}): 終了(${end})が開始(${start})より前の時刻のため、日をまたぐ勤務(翌日${end}終了)として扱いました。意図しない場合はご確認ください。` });
     }
     if (e - s > maxBlockHours * 60) {
       issues.push({ level: 'warn', date, message: `${date}: 1つの勤務ブロックが${maxBlockHours}時間を超えています(${start}-${end})。途中に休憩が必要ないか確認してください。` });
     }
     if (!byDate.has(date)) byDate.set(date, []);
-    byDate.get(date).push({ s, e, start, end, line });
+    byDate.get(date).push({ s, e, start, end, line, crossesMidnight });
   });
 
-  // 同一日内のブロックの時刻重なりチェック
+  // 同一日内のブロックの時刻重なりチェック（日またぎブロックは翌日側なので比較対象から除く）
   for (const [date, blocks] of byDate) {
-    const sorted = [...blocks].sort((a, b) => a.s - b.s);
+    const sameDay = blocks.filter((b) => !b.crossesMidnight);
+    const sorted = [...sameDay].sort((a, b) => a.s - b.s);
     for (let i = 1; i < sorted.length; i++) {
       if (sorted[i].s < sorted[i - 1].e) {
         issues.push({

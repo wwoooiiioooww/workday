@@ -38,7 +38,8 @@
   - `app/src/lib/`: aggregate（集計）/ breaks（休憩ルール）/ blocks（ブロック分割）/ planner（中核オーケストレーション）/ planio（ファイルI/O）/ validate（検査）/ preview（HTML生成）
   - `app/src/plan.js`: CLI。`node src/plan.js YYYY-MM` で plan.csv + preview.html 生成。`--refresh`（編集尊重で再描画）/ `--validate`（検査）/ `--force`（再集計上書き）
   - テスト34件全パス。合成データでCLI全経路をE2E確認済み（生成・上書き保護・refresh・validate・PTO除外・force）
-  - **次にやること**: Shotaに実heartbeat（既に数日分ある）で `node src/plan.js 2026-07` を実行してもらい、preview.html の内容が実態と合うか確認。特に、ブロック分割が「均等割り」で実際のギャップ位置に休憩を置いていない点（下記）が実用上問題ないか要フィードバック。
+  - **既知の制限を修正済み**: 深夜跨ぎ勤務(例: 21:17開始→翌日00:14終了)がvalidateでerror扱いになりパイプラインが止まる不具合を2026-07-25に修正。現行版(ref/)と同じ「終了<開始は日またぎとみなす」解釈にし、error→warnに変更(処理は止めず、意図しない場合の確認だけ促す)。日またぎブロックは同日の重なりチェック対象からも除外。テスト36件全パス。
+  - **次にやること**: Shotaに実heartbeatで再度 `node src/plan.js 2026-07` (既にplan.csvがあるので `--force`) を依頼し、preview.htmlの内容が実態と合うか確認。特に、ブロック分割が「均等割り」で実際のギャップ位置に休憩を置いていない点が実用上問題ないか要フィードバック。
 - Phase 3 (Injector) / Phase 4 (Reporter): 未着手。設計はDESIGN.md確定済み（承認①取得済み）
 
 ## 必読ファイル
