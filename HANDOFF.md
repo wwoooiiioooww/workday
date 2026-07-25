@@ -40,7 +40,16 @@
   - テスト34件全パス。合成データでCLI全経路をE2E確認済み（生成・上書き保護・refresh・validate・PTO除外・force）
   - **既知の制限を修正済み**: 深夜跨ぎ勤務(例: 21:17開始→翌日00:14終了)がvalidateでerror扱いになりパイプラインが止まる不具合を2026-07-25に修正。現行版(ref/)と同じ「終了<開始は日またぎとみなす」解釈にし、error→warnに変更(処理は止めず、意図しない場合の確認だけ促す)。日またぎブロックは同日の重なりチェック対象からも除外。テスト36件全パス。
   - **次にやること**: Shotaに実heartbeatで再度 `node src/plan.js 2026-07` (既にplan.csvがあるので `--force`) を依頼し、preview.htmlの内容が実態と合うか確認。特に、ブロック分割が「均等割り」で実際のギャップ位置に休憩を置いていない点が実用上問題ないか要フィードバック。
-- Phase 3 (Injector) / Phase 4 (Reporter): 未着手。設計はDESIGN.md確定済み（承認①取得済み）
+- **Phase 3 (Injector): 着手中（承認①取得済み 2026-07-25）**
+  - 実装済み: `app/src/lib/injectlib.js`（純粋ロジック: 日付グルーピング / result.csvによる再開時の二重入力防止 / 休憩・終了の並び検査 / 週送り回数計算）＋テスト16件、`app/src/lib/workday-selectors.js`（セレクタ集約）、`app/src/probe-workday.js`（DOM調査ツール）
+  - **codegen で判明した重要事項**（Shota実機 2026-07-25、Workdayは新UIに更新済み）:
+    - 開始/終了の入力欄は `getByRole('textbox', {name:'開始'/'終了'})` で取れる（堅牢）
+    - 週送りは `button[name='WDRES.CALENDAR.TOOLBAR.NAVIGATION.前へ: UIC Label not found!']`（Workday側の未翻訳バグだが文字列は安定）
+    - 時間アプリへは `link[name='時間']` → `link[name=/^今週 \(/]`（時間数が変動するので前方一致）
+    - **終了理由は既定が「終了」**。運用は「途中ブロック=休憩、最終ブロックのみ終了」→ plan.csvの`終了理由`列とそのまま一致する
+    - ⚠️ **日付セルだけ位置依存セレクタ（`.scroll-area > div > div > div:nth-child(8)`）しか取れず未確定**。日付との対応が不明。Phase 1の教訓（推測で4回外した）に従い、`probe-workday.js`で実DOMを採取してから実装する方針にした
+  - **次にやること**: Shotaに `node src/probe-workday.js` を実行してもらい `data/probe/workday-probe.txt` を共有してもらう→日付セルのセレクタを確定→`inject.js`本体を実装
+- Phase 4 (Reporter): 未着手。設計はDESIGN.md確定済み
 
 ## 必読ファイル
 
