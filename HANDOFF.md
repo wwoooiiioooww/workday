@@ -40,15 +40,13 @@
   - テスト34件全パス。合成データでCLI全経路をE2E確認済み（生成・上書き保護・refresh・validate・PTO除外・force）
   - **既知の制限を修正済み**: 深夜跨ぎ勤務(例: 21:17開始→翌日00:14終了)がvalidateでerror扱いになりパイプラインが止まる不具合を2026-07-25に修正。現行版(ref/)と同じ「終了<開始は日またぎとみなす」解釈にし、error→warnに変更(処理は止めず、意図しない場合の確認だけ促す)。日またぎブロックは同日の重なりチェック対象からも除外。テスト36件全パス。
   - **次にやること**: Shotaに実heartbeatで再度 `node src/plan.js 2026-07` (既にplan.csvがあるので `--force`) を依頼し、preview.htmlの内容が実態と合うか確認。特に、ブロック分割が「均等割り」で実際のギャップ位置に休憩を置いていない点が実用上問題ないか要フィードバック。
-- **Phase 3 (Injector): 着手中（承認①取得済み 2026-07-25）**
-  - 実装済み: `app/src/lib/injectlib.js`（純粋ロジック: 日付グルーピング / result.csvによる再開時の二重入力防止 / 休憩・終了の並び検査 / 週送り回数計算）＋テスト16件、`app/src/lib/workday-selectors.js`（セレクタ集約）、`app/src/probe-workday.js`（DOM調査ツール）
-  - **codegen で判明した重要事項**（Shota実機 2026-07-25、Workdayは新UIに更新済み）:
-    - 開始/終了の入力欄は `getByRole('textbox', {name:'開始'/'終了'})` で取れる（堅牢）
-    - 週送りは `button[name='WDRES.CALENDAR.TOOLBAR.NAVIGATION.前へ: UIC Label not found!']`（Workday側の未翻訳バグだが文字列は安定）
-    - 時間アプリへは `link[name='時間']` → `link[name=/^今週 \(/]`（時間数が変動するので前方一致）
-    - **終了理由は既定が「終了」**。運用は「途中ブロック=休憩、最終ブロックのみ終了」→ plan.csvの`終了理由`列とそのまま一致する
-    - ⚠️ **日付セルだけ位置依存セレクタ（`.scroll-area > div > div > div:nth-child(8)`）しか取れず未確定**。日付との対応が不明。Phase 1の教訓（推測で4回外した）に従い、`probe-workday.js`で実DOMを採取してから実装する方針にした
-  - **次にやること**: Shotaに `node src/probe-workday.js` を実行してもらい `data/probe/workday-probe.txt` を共有してもらう→日付セルのセレクタを確定→`inject.js`本体を実装
+- **Phase 3 (Injector): 実装完了（2026-07-25）・Shota実機検証待ち**
+  - `app/src/inject.js`: CLI本体。`node src/inject.js YYYY-MM [--dry-run|--yes|--assist]`
+  - `app/src/lib/injectlib.js`: 純粋ロジック（日付グルーピング / result.csvによる再開時の二重入力防止 / 休憩・終了の並び検査 / 週範囲の解析 / dayCellId生成）＋テスト25件
+  - `app/src/lib/workday-selectors.js`: 実機DOM調査で確定したセレクタを集約（詳細はworkday-rpa/SKILL.mdの表）
+  - **実機DOM調査で判明した決定的事実**: 日付セルに `dayCell-{0始まりの月}-{日}` という安定IDがある（位置依存セレクタ不要）。`hoursEntered_{0..6}` で読み戻し検証できる。週ラベル `dateRangeTitle` は全角チルダ`～`
+  - **検証済み（モックWorkdayに対する実ブラウザE2E）**: 確認ゲート→週移動→日付セルクリック→ポップアップ入力→休憩の選択→OK→読み戻し検証→result.csv記録、の全経路が動作。中断→再開で二重入力しないこと、部分再開、`--dry-run`でOKを押さないこと、不正plan（最終ブロックが休憩）の事前検出も確認済み
+  - **次にやること**: Shotaに実Workdayで `node src/inject.js <月> --dry-run` から試してもらう。失敗時は `data/probe/inject-dump-*.txt` が自動生成されるので、それを共有してもらって修正する。特に不確実なのは (a) 時間グリッドのクリック位置で「時間を入力」リンクが出るか (b) 終了理由ドロップダウンのセレクタ（probeで未確認、ref/の実績値を使用）
 - Phase 4 (Reporter): 未着手。設計はDESIGN.md確定済み
 
 ## 必読ファイル

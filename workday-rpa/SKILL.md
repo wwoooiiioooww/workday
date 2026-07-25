@@ -43,6 +43,27 @@ description: Workday勤怠自動入力プロジェクト固有の知見。PC稼�
 - 残業計算の基準は 7.5h/日（Cisco所定）。8h/日換算を参考併記。
 - 休憩は労基法準拠がデフォルト: 6時間超45分・8時間超60分。
 
+## Workday画面の実測セレクタ（2026-07-25 実機DOM調査で確定・新UI）
+
+`src/probe-workday.js` の調査結果。すべて `data-automation-id`（以下aid）で取れる。詳細は `app/src/lib/workday-selectors.js` に集約済み。
+
+| 用途 | セレクタ | 備考 |
+|---|---|---|
+| 日付セル | `dayCell-{0始まりの月}-{日}` | **6/29→`dayCell-5-29`、7/1→`dayCell-6-1`**。月は0始まりなので注意 |
+| その日の合計時間 | `hoursEntered_{0..6}` | 0=月曜。表示は「時間: 13.5」。**読み戻し検証に使える** |
+| 週の期間ラベル | `dateRangeTitle` | 「2026年6月29日～7月5日」。**全角チルダ`～`**。同月内は「2026年7月20日～26日」と終わり側の月が省略される |
+| 前週/次週 | `prevMonthButton` / `nextMonthButton` | 週表示でも名前は Month のまま。aria-labelはWorkday側のバグで未翻訳 |
+| 週表示の本体 | `weeklyBody` | 列のx座標を取るのに使う |
+| 「時間を入力」リンク | `calendarAppointmentEnterTime` | **時間グリッドの空き部分をクリックすると出現する**。これを押すとポップアップが開く |
+| 登録済み予定 | `calendarevent` + `calendarAppointmentTitle`/`Subtitle`/`Subtitle2` | サブタイトルが「10:00 - 14:00 (休憩)」形式。読み戻しに使う |
+| 開始/終了の入力欄 | `getByRole('textbox', {name:'開始'/'終了'})` | aria-labelledbyが動的IDなので、ラベル経由で取るのが確実 |
+| OKボタン | `wd-CommandButton` かつテキスト`OK` | **同じaidが「別のカレンダー ビュー」等にも使われるのでテキストで絞る必須** |
+| 右のサマリ | `summarizedListItem` | Working/Midnight/Overtime/Total の各時間 |
+| ⚠️提出ボタン | `label` かつ aria-label が`レビュー`始まり | **絶対に自動で押さない** |
+
+- 時刻入力は "HHmm"（4桁ゼロ埋め、例 `0900`）で受理される（ref/の1年間の実績、codegenでは`900`でも通った）。
+- **終了理由の既定値は「終了」**。運用は「途中ブロック=休憩、最終ブロックのみ=終了」なので、途中ブロックのみ変更操作が要る。ドロップダウンは `selectWidget` → `promptOption`（ref/の実績セレクタ。probeでは要素数上限に達し未確認のため、inject.js は失敗時にDOMを自動ダンプする）。
+
 ## Workday自動操作（Phase 3）の規約
 
 - セレクタは `data-automation-id` を第一優先。日本語ラベルテキスト依存はフォールバック扱い。

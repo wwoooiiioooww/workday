@@ -104,6 +104,52 @@ export function makeResultRow(block, result, note = '') {
   };
 }
 
+/**
+ * 日付から Workday の日付セルの data-automation-id を組み立てる。
+ * 実機DOM調査(2026-07-25)で判明した規則: dayCell-{0始まりの月}-{日}
+ *   6/29 → dayCell-5-29 / 7/1 → dayCell-6-1
+ */
+export function dayCellId(dateStr) {
+  const [, m, d] = dateStr.split('-').map(Number);
+  return `dayCell-${m - 1}-${d}`;
+}
+
+/** 週内の位置(0=月曜 … 6=日曜)。読み戻し用の hoursEntered_{i} の添字に使う。 */
+export function dayIndexInWeek(dateStr) {
+  const toDate = (s) => { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d, 12, 0, 0); };
+  const diffMs = toDate(dateStr) - toDate(mondayOf(dateStr));
+  return Math.round(diffMs / (24 * 60 * 60 * 1000));
+}
+
+/**
+ * 画面の週ラベルを解析して {start, end} ('YYYY-MM-DD') を返す。解析できなければ null。
+ * 実機の表記ゆれに対応する:
+ *   「2026年6月29日～7月5日」（月をまたぐ・全角チルダ）
+ *   「2026年7月20日～26日」（同月内は終わり側の月が省略される）
+ *   波ダッシュ〜 / 全角チルダ～ / ハイフン のいずれも許容する
+ */
+export function parseWeekRange(text) {
+  const m = String(text).match(/(\d{4})年\s*(\d{1,2})月(\d{1,2})日\s*[～〜~\-–—]\s*(?:(\d{1,2})月)?(\d{1,2})日/);
+  if (!m) return null;
+  const year = Number(m[1]);
+  const sM = Number(m[2]);
+  const sD = Number(m[3]);
+  const eM = m[4] ? Number(m[4]) : sM;
+  const eD = Number(m[5]);
+  // 12月→1月をまたぐ週は、終わり側が翌年になる
+  const eY = eM < sM ? year + 1 : year;
+  const p = (n) => String(n).padStart(2, '0');
+  return { start: `${year}-${p(sM)}-${p(sD)}`, end: `${eY}-${p(eM)}-${p(eD)}` };
+}
+
+/** 対象日が、表示中の週(range)より前(-1)・中(0)・後(1)のどれかを返す。 */
+export function weekDirection(targetDate, range) {
+  if (!range) return null;
+  if (targetDate < range.start) return -1;
+  if (targetDate > range.end) return 1;
+  return 0;
+}
+
 /** 'YYYY-MM-DD' を含む週（月曜始まり）の月曜日を返す。週送り回数の計算に使う。 */
 export function mondayOf(dateStr) {
   const [y, m, d] = dateStr.split('-').map(Number);
