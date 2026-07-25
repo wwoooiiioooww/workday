@@ -59,7 +59,9 @@ const COLLECT = String.raw`(() => {
     return out;
   };
 
-  const all = [...document.querySelectorAll('*')];
+  // html/body/main のような大枠は、中の文字を全部含んでしまいノイズになるので除外する
+  const SKIP_TAGS = new Set(['html', 'body', 'head', 'script', 'style']);
+  const all = [...document.querySelectorAll('*')].filter((el) => !SKIP_TAGS.has(el.tagName.toLowerCase()));
   const vis = (d) => d.visible;
 
   // 1. 週ラベル（例: 2026年6月29日〜7月5日）: この文字列を持つ最も内側の要素
@@ -125,6 +127,14 @@ function fmt(title, rows) {
   return lines.join('\n');
 }
 
+// 採取済みの内容を毎回ファイルに書き出す。途中でエラーが起きても、
+// そこまでの採取結果が必ず残るようにするため（実機では手順の途中で
+// 問題が起きても再実行のコストが高いので、部分結果を守る）。
+function saveChunks(chunks) {
+  fs.mkdirSync(path.dirname(outPath), { recursive: true });
+  fs.writeFileSync(outPath, chunks.join('\n'), 'utf8');
+}
+
 async function snapshot(page, label) {
   const d = await page.evaluate(COLLECT);
   return [
@@ -142,12 +152,19 @@ async function snapshot(page, label) {
 }
 
 async function main() {
-  fs.mkdirSync(path.dirname(outPath), { recursive: true });
   fs.mkdirSync(profileDir, { recursive: true });
 
+  const chunks = [`Workday DOM Probe  ${new Date().toISOString()}`];
+  // 起動時点で空ファイルを作っておく。保存先が確実に存在することを先に見せ、
+  // 「どこに出るのか分からない」状態をなくす。
+  saveChunks(chunks);
+
   console.log('Workday DOM調査ツール');
-  console.log('=====================================');
-  console.log('ブラウザを起動します。ログインして勤怠入力の週表示まで進めてください。\n');
+  console.log('==========================================================');
+  console.log('■ 調査結果の保存先（実行後、このファイルの中身をAIに貼ってください）:');
+  console.log(`  ${outPath}`);
+  console.log('==========================================================\n');
+  console.log('ブラウザを起動します。ログインして勤怠入力の週表示まで進めてください。');
 
   const context = await chromium.launchPersistentContext(profileDir, {
     channel: 'chrome',
@@ -157,32 +174,47 @@ async function main() {
   const page = context.pages()[0] || await context.newPage();
   await page.goto(HOME_URL);
 
-  const chunks = [`Workday DOM Probe  ${new Date().toISOString()}`];
+  // 各手順は個別にtry/catchする。1箇所失敗しても他の採取結果は残す。
+  const step = async (prompt, label, skippable = false) => {
+    const ans = await ask(prompt);
+    if (skippable && ans.trim().toLowerCase() === 's') {
+      console.log('  → スキップしました。');
+      return;
+    }
+    try {
+      chunks.push(await snapshot(page, label));
+      console.log(`  → 「${label}」のDOMを採取しました。`);
+    } catch (e) {
+      chunks.push(`\n===== ${label} =====\n採取に失敗: ${e.message}`);
+      console.log(`  ⚠ 「${label}」の採取に失敗しました: ${e.message}（続行します）`);
+    }
+    saveChunks(chunks); // 手順ごとに保存（途中終了しても結果が残る）
+  };
 
-  await ask('\n【手順1】ログインし、勤怠入力の「週表示」（日付が横に並ぶ画面）まで進めたら Enter: ');
-  chunks.push(await snapshot(page, '週表示'));
-  console.log('  → 週表示のDOMを採取しました。');
+  await step('\n【手順1】ログインし、勤怠入力の「週表示」（日付が横に並ぶ画面）まで進めたら Enter: ', '週表示');
+  await step('\n【手順2】任意の日付をクリックして入力ポップアップを開いたら Enter: ', '入力ポップアップ');
+  await step('\n【手順3・任意】終了理由のドロップダウンを開いた状態にできたら Enter（不要なら s + Enter）: ', '終了理由ドロップダウン展開時', true);
 
-  await ask('\n【手順2】任意の日付をクリックして入力ポップアップを開いたら Enter: ');
-  chunks.push(await snapshot(page, '入力ポップアップ'));
-  console.log('  → ポップアップのDOMを採取しました。');
-
-  const ans = await ask('\n【手順3・任意】終了理由のドロップダウンを開いた状態にできたら Enter（不要なら s + Enter）: ');
-  if (ans.trim().toLowerCase() !== 's') {
-    chunks.push(await snapshot(page, '終了理由ドロップダウン展開時'));
-    console.log('  → ドロップダウンのDOMを採取しました。');
-  }
-
-  fs.writeFileSync(outPath, chunks.join('\n'), 'utf8');
-  console.log(`\n✅ 調査結果を保存しました: ${outPath}`);
-  console.log('   このファイルの内容をAIに共有してください（認証情報は含まれません）。');
-  console.log('   ※ ポップアップは OK を押さずに閉じて構いません。');
+  console.log('\n==========================================================');
+  console.log('✅ 調査結果を保存しました。以下のファイルの中身をAIに貼ってください:');
+  console.log(`  ${outPath}`);
+  console.log('（認証情報は含まれません。ポップアップは OK を押さずに閉じて構いません）');
+  console.log('==========================================================');
+  console.log('\nメモ帳で開くには、別のPowerShellで以下を実行してください:');
+  console.log(`  notepad "${outPath}"`);
 
   await ask('\nEnter を押すとブラウザを閉じます: ');
   await context.close();
 }
 
 main().catch((e) => {
-  console.error(`❌ エラー: ${e.message}`);
+  console.error(`\n❌ エラー: ${e.message}`);
+  console.error(`   ここまでの採取結果は次の場所に保存されています: ${outPath}`);
+  if (/Cannot find module|ERR_MODULE_NOT_FOUND/.test(e.message)) {
+    console.error('   → app フォルダで `npm install` を実行してから再試行してください。');
+  }
+  if (/executable doesn't exist|channel/i.test(e.message)) {
+    console.error('   → `npx playwright install chrome` を実行してから再試行してください。');
+  }
   process.exit(1);
 });
