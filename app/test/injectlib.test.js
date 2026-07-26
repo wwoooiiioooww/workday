@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   blockKey, groupPlanByDate, doneBlockKeys, pendingByDate,
   checkDayBlocks, formatConfirmation, makeResultRow, mondayOf, weekOffset,
-  dayCellId, dayIndexInWeek, parseWeekRange, weekDirection,
+  dayCellId, dayIndexInWeek, parseWeekRange, weekDirection, effectiveMinutes, hasAfterMidnightBlock,
 } from '../src/lib/injectlib.js';
 import { toWorkdayTime, parseEventSubtitle, parseHoursEntered, SELECTORS } from '../src/lib/workday-selectors.js';
 
@@ -194,4 +194,37 @@ test('parseHoursEntered: 日ヘッダの合計表示から数値を取り出す'
 test('SELECTORS: 日付セル/合計表示のセレクタが実機IDを組み立てる', () => {
   assert.equal(SELECTORS.dayCell(dayCellId('2026-07-01')), "[data-automation-id='dayCell-6-1']");
   assert.equal(SELECTORS.hoursEntered(0), "[data-automation-id='hoursEntered_0']");
+});
+
+// --- 再発防止: 2026-07-25 Shota実データで発覚した深夜勤務の並び替えバグ ---
+test('groupPlanByDate: 深夜帯(00:04)のブロックを朝一と誤認せず、時系列の最後に並べる', () => {
+  // 実データ: 2026-07-22 は 14:22-14:44(休憩) → 00:04-00:27(終了) の深夜勤務。
+  // ファイル上の並び順に関わらず、勤務日内の時系列で整列する必要がある。
+  const g = groupPlanByDate([
+    blk('2026-07-22', '00:04', '00:27', '終了'),
+    blk('2026-07-22', '14:22', '14:44', '休憩'),
+  ]);
+  const blocks = g.get('2026-07-22');
+  assert.equal(blocks[0]['開始'], '14:22', '14:22が先');
+  assert.equal(blocks[1]['開始'], '00:04', '深夜の00:04が後');
+});
+
+test('checkDayBlocks: 深夜勤務の日を誤って不正と判定しない（実データの再現）', () => {
+  const g = groupPlanByDate([
+    blk('2026-07-22', '00:04', '00:27', '終了'),
+    blk('2026-07-22', '14:22', '14:44', '休憩'),
+  ]);
+  assert.deepEqual(checkDayBlocks('2026-07-22', g.get('2026-07-22')), []);
+});
+
+test('effectiveMinutes: 区切り時刻より前は+24時間して扱う', () => {
+  assert.equal(effectiveMinutes('14:22'), 14 * 60 + 22);
+  assert.equal(effectiveMinutes('00:04'), 24 * 60 + 4);
+  assert.equal(effectiveMinutes('04:59'), 24 * 60 + 4 * 60 + 59);
+  assert.equal(effectiveMinutes('05:00'), 5 * 60, '区切り時刻ちょうどは当日扱い');
+});
+
+test('hasAfterMidnightBlock: 深夜帯のブロックを含む日を検出する', () => {
+  assert.equal(hasAfterMidnightBlock([blk('2026-07-22', '14:22', '14:44', '休憩'), blk('2026-07-22', '00:04', '00:27', '終了')]), true);
+  assert.equal(hasAfterMidnightBlock([blk('2026-07-21', '09:00', '18:00', '終了')]), false);
 });

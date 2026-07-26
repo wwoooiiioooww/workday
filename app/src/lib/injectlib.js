@@ -12,12 +12,34 @@ export function blockKey(row) {
   return `${(row['日付'] || '').trim()} ${(row['開始'] || '').trim()}-${(row['終了'] || '').trim()}`;
 }
 
-/** plan行を日付ごとにまとめる（日付昇順・各日は開始時刻昇順）。 */
-export function groupPlanByDate(rows) {
-  const toMin = (hm) => {
-    const m = String(hm).match(/^(\d{1,2}):(\d{2})$/);
-    return m ? Number(m[1]) * 60 + Number(m[2]) : 0;
-  };
+/** 勤務日の区切り時刻（既定 AM5:00）。これより前の時刻は前日からの続き＝深夜帯とみなす。 */
+export const DEFAULT_SPLIT_HOUR = 5;
+
+/**
+ * 並び替え用の「その勤務日における経過分」。
+ * 区切り時刻より前（例 00:04）は前日から続く深夜帯なので +24時間して扱う。
+ * こうしないと深夜勤務の日で 00:04 が朝一と誤認され、ブロックの順序が逆転する
+ * （2026-07-25 実データで発覚: 14:22-14:44 と 00:04-00:27 の順序が入れ替わり、
+ *   「途中ブロックなのに終了」「最終ブロックなのに休憩」と誤検出された）。
+ */
+export function effectiveMinutes(hm, splitHour = DEFAULT_SPLIT_HOUR) {
+  const m = String(hm).match(/^(\d{1,2}):(\d{2})$/);
+  if (!m) return 0;
+  const min = Number(m[1]) * 60 + Number(m[2]);
+  return min < splitHour * 60 ? min + 24 * 60 : min;
+}
+
+/** その日のブロックに深夜帯（区切り時刻より前）のものが含まれるか。 */
+export function hasAfterMidnightBlock(blocks, splitHour = DEFAULT_SPLIT_HOUR) {
+  return blocks.some((b) => {
+    const m = String(b['開始']).match(/^(\d{1,2}):(\d{2})$/);
+    return m && Number(m[1]) * 60 + Number(m[2]) < splitHour * 60;
+  });
+}
+
+/** plan行を日付ごとにまとめる（日付昇順・各日は勤務日内の時系列順）。 */
+export function groupPlanByDate(rows, splitHour = DEFAULT_SPLIT_HOUR) {
+  const toMin = (hm) => effectiveMinutes(hm, splitHour);
   const byDate = new Map();
   for (const r of rows) {
     const date = (r['日付'] || '').trim();

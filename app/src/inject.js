@@ -22,7 +22,7 @@ import { loadConfig, readPlanCsv, fromCsv, toCsv } from './lib/planio.js';
 import {
   RESULT_COLUMNS, groupPlanByDate, pendingByDate, checkDayBlocks,
   formatConfirmation, makeResultRow, dayCellId, dayIndexInWeek,
-  parseWeekRange, weekDirection,
+  parseWeekRange, weekDirection, hasAfterMidnightBlock,
 } from './lib/injectlib.js';
 import { SELECTORS, toWorkdayTime, parseEventSubtitle, parseHoursEntered } from './lib/workday-selectors.js';
 
@@ -297,6 +297,17 @@ async function main() {
   if (resultRows.length > 0) console.log(`（入力済みの分はスキップします: ${resultPath}）\n`);
   console.log('これから以下の内容を入力します:\n');
   console.log(formatConfirmation(pending));
+
+  // 深夜帯（AM5時より前）のブロックを含む日は、Workday上のどの日に入れるべきか
+  // 解釈が分かれるため、必ず本人の目で確認してもらう
+  const midnightDates = [...pending.entries()].filter(([, b]) => hasAfterMidnightBlock(b)).map(([d]) => d);
+  if (midnightDates.length) {
+    console.log('\n⚠ 深夜（午前0時台）にまたがる勤務の日があります:');
+    midnightDates.forEach((d) => console.log(`   ${d}`));
+    console.log('   これらは「その勤務日の欄」に深夜の時刻として入力します（現行版と同じ扱い）。');
+    console.log('   Workday上の表示が意図と違う場合は、入力後に画面で調整してください。');
+  }
+
   console.log('\n※ 提出（レビュー）ボタンは押しません。最後にご自身で確認して提出してください。');
   const answer = await ask('\nこの内容で入力を開始しますか？ [y/N]: ');
   if (answer.toLowerCase() !== 'y') {
