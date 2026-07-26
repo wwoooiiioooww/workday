@@ -19,7 +19,7 @@ Workday入力用CSVファイルを読み込み、人間が開いたポップア�
 
 # --- ★★★ ユーザー設定項目 ★★★ ---
 # WebDriverの実行ファイルがあるフォルダのパス
-$WebDriverPath = "C:\Users\shitagak\OneDrive - Cisco\Documents\002_Internal\005_AIツール\勤怠時間\chromedriver-win64"
+$WebDriverPath = "C:\path\to\chromedriver-win64"  # 公開リポジトリのため実パスは伏せている（元は個人のOneDrive配下）
 $ChromeDriverExecutable = "chromedriver.exe"
 # Workdayの初期URL
 $WorkdayInitialURL = "https://wd5.myworkday.com/cisco/d/home.htmld"

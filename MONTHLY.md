@@ -6,7 +6,8 @@
 作業フォルダ（以後すべてここで作業する）:
 
 ```powershell
-cd "C:\Users\shitagak\OneDrive - Cisco\Documents\002_Internal\005_AIツール\Workday-git\app"
+cd "<このツールを置いたフォルダ>\app"
+# 例: cd "C:\Users\<ユーザー名>\Documents\Workday-git\app"
 ```
 
 ---
