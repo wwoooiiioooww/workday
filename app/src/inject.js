@@ -90,39 +90,80 @@ async function dumpDom(page, label) {
   }
 }
 
-/** 表示中の週の範囲を読む。 */
-async function readWeekRange(page) {
+/** 週ラベルの生テキストを読む。 */
+async function readWeekLabelText(page) {
   const el = page.locator(SELECTORS.weekRangeLabel).first();
   await el.waitFor({ state: 'visible', timeout: 30000 });
-  return parseWeekRange((await el.innerText()).trim());
+  return (await el.innerText()).trim();
+}
+
+/** 表示中の週の範囲を読む。 */
+async function readWeekRange(page) {
+  return parseWeekRange(await readWeekLabelText(page));
+}
+
+/**
+ * 週ラベルが prevText から変わるまで待つ。変わったら true。
+ * Workday はカレンダーの再描画に時間がかかることがあるため、
+ * 「変わっていない＝移動失敗」と即断せず、ここで十分に待つ。
+ */
+async function waitForWeekLabelChange(page, prevText, timeout) {
+  try {
+    await page.waitForFunction(
+      ({ sel, prev }) => {
+        const e = document.querySelector(sel);
+        const t = e && (e.innerText || '').trim();
+        return !!t && t !== prev;
+      },
+      { sel: SELECTORS.weekRangeLabel, prev: prevText },
+      { timeout },
+    );
+    await page.waitForTimeout(500); // 描画の落ち着き待ち
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** 目的の日付が含まれる週まで、前へ/次へを押して移動する。 */
 async function navigateToWeek(page, targetDate) {
   for (let i = 0; i < MAX_WEEK_NAV; i++) {
-    const range = await readWeekRange(page);
-    if (!range) throw new Error('週の表示（例: 2026年6月29日～7月5日）を読み取れませんでした。勤怠の週表示が開いているか確認してください。');
+    const label = await readWeekLabelText(page);
+    const range = parseWeekRange(label);
+    if (!range) throw new Error(`週の表示（例: 2026年6月29日～7月5日）を読み取れませんでした（実際の表示: "${label}"）。勤怠の週表示が開いているか確認してください。`);
     const dir = weekDirection(targetDate, range);
     if (dir === 0) return range;
+
     const btn = dir < 0 ? SELECTORS.prevWeekButton : SELECTORS.nextWeekButton;
-    await page.locator(btn).first().click();
-    // 週ラベルが変わるまで待つ（描画完了の目印にする）
-    const before = `${range.start}_${range.end}`;
-    await page.waitForFunction(
-      ([sel, prev]) => {
-        const e = document.querySelector(sel);
-        return e && e.innerText.trim() !== '' && e.innerText.trim() !== prev;
-      },
-      [SELECTORS.weekRangeLabel, ''],
-      { timeout: 20000 },
-    ).catch(() => {});
-    await page.waitForTimeout(600);
-    const after = await readWeekRange(page);
-    if (after && `${after.start}_${after.end}` === before) {
-      throw new Error(`週の移動ができませんでした（${range.start}〜${range.end} のまま）。`);
+    // 1回目のクリックで反応がなければ、もう一度だけ押して待ち直す
+    // （2026-07-25 実機では待ち時間不足で「移動できない」と誤判定していた）
+    let moved = false;
+    for (let attempt = 0; attempt < 2 && !moved; attempt++) {
+      await page.locator(btn).first().click();
+      moved = await waitForWeekLabelChange(page, label, 20000);
+    }
+    if (!moved) {
+      throw new Error(`週の移動ができませんでした（${range.start}〜${range.end} のまま。ボタンを2回押しても表示が変わりませんでした）。`);
     }
   }
   throw new Error(`${MAX_WEEK_NAV}回移動しても目的の週（${targetDate}）に到達できませんでした。`);
+}
+
+/** 開いているポップアップを閉じる（キャンセル→閉じる→Escape の順に試す）。 */
+async function closePopup(page) {
+  const startInput = page.getByRole('textbox', { name: '開始' }).first();
+  for (const sel of [SELECTORS.cancelButton, SELECTORS.closeButton]) {
+    const btn = page.locator(sel).first();
+    if (await btn.isVisible().catch(() => false)) {
+      await btn.click().catch(() => {});
+      if (await startInput.isHidden().catch(() => false)) return true;
+      await startInput.waitFor({ state: 'hidden', timeout: 5000 }).catch(() => {});
+      if (await startInput.isHidden().catch(() => true)) return true;
+    }
+  }
+  await page.keyboard.press('Escape').catch(() => {});
+  await startInput.waitFor({ state: 'hidden', timeout: 5000 }).catch(() => {});
+  return await startInput.isHidden().catch(() => true);
 }
 
 /** その日の入力ポップアップを開く。 */
@@ -208,7 +249,12 @@ async function fillBlock(page, block, { dryRun }) {
 
   if (dryRun) {
     console.log(`   🧪 [dry-run] ${block['開始']}-${block['終了']} (${reason}) を入力しました（OKは押しません）`);
-    await ask('   確認したら Enter を押してください（ポップアップは手動で閉じてください）: ');
+    await ask('   ブラウザで内容を確認したら Enter を押してください（ポップアップは自動で閉じます）: ');
+    const closed = await closePopup(page);
+    if (!closed) {
+      console.log('   ⚠ ポップアップを自動で閉じられませんでした。手動で閉じてから次に進んでください。');
+      await ask('   閉じたら Enter: ');
+    }
     return;
   }
 
