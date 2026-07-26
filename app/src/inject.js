@@ -166,6 +166,37 @@ async function closePopup(page) {
   return await startInput.isHidden().catch(() => true);
 }
 
+/**
+ * カレンダーの再描画が落ち着くまで待つ。
+ * OK保存の直後は Workday が画面を作り直しており、この間にクリックすると
+ * オーバーレイに遮られたり、対象要素がDOMから消えたりする
+ * （2026-07-26 実機で発生: WASO というdivが pointer events を横取りした）。
+ */
+async function waitForCalendarSettled(page, timeout = 12000) {
+  // 前回の「時間を入力」プレースホルダが残っていれば、消えるまで待つ
+  await page.locator(SELECTORS.enterTimeLink).first()
+    .waitFor({ state: 'detached', timeout }).catch(() => {});
+  await page.waitForTimeout(1000);
+}
+
+/**
+ * クリックする。オーバーレイに遮られた場合は要素へ直接イベントを送る。
+ * （Workdayのカレンダー部品はGWT製で、mousedown/mouseupにも反応するため一通り送る）
+ */
+async function clickRobust(locator) {
+  try {
+    await locator.click({ timeout: 8000 });
+    return;
+  } catch {
+    await locator.evaluate((el) => {
+      const opts = { bubbles: true, cancelable: true, view: window };
+      el.dispatchEvent(new MouseEvent('mousedown', opts));
+      el.dispatchEvent(new MouseEvent('mouseup', opts));
+      el.dispatchEvent(new MouseEvent('click', opts));
+    });
+  }
+}
+
 /** その日の入力ポップアップを開く。 */
 async function openEntryPopup(page, date, assist) {
   if (assist) {
@@ -173,30 +204,40 @@ async function openEntryPopup(page, date, assist) {
     return;
   }
   const cellSel = SELECTORS.dayCell(dayCellId(date));
-  const cell = page.locator(cellSel).first();
-  await cell.waitFor({ state: 'visible', timeout: 20000 });
-  const cellBox = await cell.boundingBox();
-  const body = page.locator(SELECTORS.weeklyBody).first();
-  const bodyBox = await body.boundingBox();
-  if (!cellBox || !bodyBox) throw new Error(`${date} の日付セル（${cellSel}）の位置を取得できませんでした。`);
+  const startInput = page.getByRole('textbox', { name: '開始' }).first();
+  // クリックする高さを変えながら試す。既存の予定と重なると
+  // 「時間を入力」が出ないため、空いていそうな場所を順に狙う
+  const ratios = [0.55, 0.3, 0.75, 0.45, 0.85];
+  let lastError = null;
 
-  // 日付セルの列に合わせた x で、時間グリッドの中ほどをクリックすると
-  // 「時間を入力」リンクが現れる（実機DOM調査で確認した挙動）
-  const x = cellBox.x + cellBox.width / 2;
-  const y = bodyBox.y + bodyBox.height * 0.55;
-  await page.mouse.click(x, y);
+  for (const ratio of ratios) {
+    try {
+      await waitForCalendarSettled(page);
+      const cell = page.locator(cellSel).first();
+      await cell.waitFor({ state: 'visible', timeout: 20000 });
+      const cellBox = await cell.boundingBox();
+      const bodyBox = await page.locator(SELECTORS.weeklyBody).first().boundingBox();
+      if (!cellBox || !bodyBox) throw new Error(`${date} の日付セル（${cellSel}）の位置を取得できませんでした。`);
 
-  const enter = page.locator(SELECTORS.enterTimeLink).first();
-  try {
-    await enter.waitFor({ state: 'visible', timeout: 8000 });
-  } catch {
-    // クリック位置に既存の予定があると出ないことがあるので、少し上でも試す
-    await page.mouse.click(x, bodyBox.y + bodyBox.height * 0.25);
-    await enter.waitFor({ state: 'visible', timeout: 8000 });
+      // 日付セルの列に合わせた x で、時間グリッドをクリックすると
+      // 「時間を入力」リンクが現れる（実機DOM調査で確認した挙動）
+      const x = cellBox.x + cellBox.width / 2;
+      const y = bodyBox.y + bodyBox.height * ratio;
+      await page.mouse.click(x, y);
+
+      const enter = page.locator(SELECTORS.enterTimeLink).first();
+      await enter.waitFor({ state: 'visible', timeout: 8000 });
+      await clickRobust(enter);
+      await startInput.waitFor({ state: 'visible', timeout: 15000 });
+      return;
+    } catch (e) {
+      lastError = e;
+      // 中途半端に開いた画面を閉じてから、位置を変えてやり直す
+      await page.keyboard.press('Escape').catch(() => {});
+      await page.waitForTimeout(1200);
+    }
   }
-  await enter.click();
-  // ポップアップの「開始」入力欄が出るまで待つ
-  await page.getByRole('textbox', { name: '開始' }).first().waitFor({ state: 'visible', timeout: 20000 });
+  throw new Error(`入力ポップアップを開けませんでした: ${lastError ? lastError.message.split('\n')[0] : '原因不明'}`);
 }
 
 /** 終了理由を選ぶ（既定は「終了」なので、「休憩」のときだけ変更する）。 */
@@ -264,7 +305,8 @@ async function fillBlock(page, block, { dryRun }) {
   // ポップアップが閉じる（=開始欄が消える）のを待つ
   await page.getByRole('textbox', { name: '開始' }).first()
     .waitFor({ state: 'hidden', timeout: 20000 }).catch(() => {});
-  await page.waitForTimeout(1200);
+  // 保存後はカレンダーが作り直される。次の操作の前に落ち着くまで待つ
+  await waitForCalendarSettled(page);
 }
 
 /** その日の入力結果を画面から読み戻す。 */
