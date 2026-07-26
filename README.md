@@ -9,7 +9,7 @@ PCの電源が入っていた時間（スタンバイ・シャットダウン除
 | 1 | Collector（PC稼働時間の記録） | ✅ 実機検証完了（2026-07-21） |
 | 2 | Planner（集計・プラン生成・HTMLプレビュー） | ✅ 実機検証完了（2026-07-25） |
 | 3 | Injector（Workday自動入力） | ✅ 実機検証完了（2026-07-26） |
-| 4 | Reporter（勤怠レポート） | 未着手 |
+| 4 | Reporter（勤怠レポート） | ✅ 実装済み |
 | 5 | 展開パッケージ（他Windowsユーザー向け） | 未着手 |
 
 ## Phase 1: Collector のセットアップ（Windows 11）
@@ -151,6 +151,65 @@ node src/inject.js 2026-07 --assist
   という記録になり、次回スキップされる
 - 失敗時は画面の状態が `data/probe/inject-dump-*.txt` に保存される（開発者への共有用）
 - `plan.csv` の終了理由が「途中=休憩・最終=終了」になっていない場合は、実行前に止まる
+
+## Phase 4: Reporter（勤怠レポート）
+
+働き方を振り返るレポートを生成する。**HTML（本人確認用・グラフ付き）**と
+**Markdown（Obsidian等のLLM Wiki用・機械可読）**の2種類を出力する。
+
+```bash
+cd app
+
+# 月次レポート
+node src/report.js 2026-07
+
+# 期間指定（複数月をまたげる）
+node src/report.js --from 2026-07-01 --to 2026-09-30
+
+# 既存のMarkdownを上書きする（既定では上書きしない）
+node src/report.js 2026-07 --force
+
+# HTMLだけ生成する
+node src/report.js 2026-07 --html-only
+```
+
+生成物は `data/report/workday-report_YYYY-MM.html` と `.md`。
+
+### 内容
+
+- サマリ（勤務日数／総実働／1日平均／残業[7.5h基準＋8h換算]／**深夜労働**／平均始業終業）
+- 日別の勤務帯（実際に働いていた時間帯を帯で表示。深夜帯を背景色で明示）
+- 残業の累積推移（目安上限ラインつき。「あと何時間で上限か」が分かる）
+- 曜日別の平均実働／始業・終業の分布／中断の多い日
+- 入力状況（plan と result の突き合わせ）
+- 気づき（フラグ）: 残業超過・深夜労働・実働が極端な日・未入力など、**注意すべき点だけ**
+
+### 深夜労働について
+
+労働基準法の深夜帯（**22:00〜翌05:00**）に重なる労働時間を集計する。
+管理監督者でも深夜割増は対象になるため、独立した項目として表示している。
+時間帯は `config.json` の `report.nightStartHour` / `nightEndHour` で変更可能。
+
+### データ元
+
+`plan.csv` があればそれを使う（手修正やPTO反映後の「実際に申告した内容」のため）。
+無ければ heartbeat から集計する。どちらを使ったかはレポートに明記される。
+
+### Obsidian（LLM Wiki）連携
+
+`config.json` の `report.markdownDir` にObsidianのフォルダを絶対パスで指定すると、
+そこへMarkdownを出力する。
+
+```json
+"report": {
+  "markdownDir": "C:/Users/<user>/OneDrive - Cisco/Documents/Obsidian_Knowledge/_Reference📚/Work/workday-reports"
+}
+```
+
+Markdownは **BOMなしUTF-8**、frontmatterに機械可読メトリクス（`work_days`,
+`total_worked_hours`, `overtime_h_over_75`, `night_hours`, `flags` 等）を持ち、
+本文は表中心の7セクション構成。**確定した月次レポートを守るため、既存ファイルは
+`--force` を付けない限り上書きしない。**
 
 ## 開発者向け
 

@@ -48,7 +48,14 @@
     3. 保存直後のWASOオーバーレイでポップアップを開けない（落ち着き待ち＋直接dispatch＋位置を変えた再試行）
   - 実装: `app/src/inject.js` / `lib/injectlib.js` / `lib/workday-selectors.js`。セレクタ詳細はworkday-rpa/SKILL.mdの表
   - 残タスク: 提出（レビュー）は人間が行う設計のまま。Shotaは2026-07を「参考データ・テスト期間」とし提出しない方針。2026-08から本運用予定
-- Phase 4 (Reporter): 未着手。設計はDESIGN.md確定済み
+- **Phase 4 (Reporter): 実装完了（2026-07-26）・Shota確認待ち**
+  - `app/src/report.js` + `lib/reportlib.js`（集計）/ `lib/reportview.js`（HTML+インラインSVG）/ `lib/reportmd.js`（Obsidian用Markdown）
+  - **深夜労働（労基法22:00-05:00）の集計を追加**。Shotaは管理職で残業は出ないが深夜割増は対象のため、独立項目として表示。日をまたぐブロックも正しく按分する
+  - **Obsidian(LLM Wiki)向けMarkdown出力**: frontmatterに機械可読メトリクス＋本文7セクション。仕様はShota経由でCopilotから提示されたもの（schema_version:1）。**BOMなしUTF-8**（CSVはBOM付きなので逆。混同しないこと）。確定済みレポートを守るため既存ファイルは`--force`なしで上書きしない
+  - データ元は plan.csv 優先（手修正・PTO反映後の申告内容）、無ければ heartbeat。どちらを使ったか明記する
+  - フラグはルールベース（残業超過/深夜労働/実働が極端な日/未入力）。正常値は並べない。**AIなしで完結する**設計で、そのMDをCopilotに読ませて解釈を足す想定
+  - グラフはdatavizスキルの検証済みパレットを使用（light/dark両モードでvalidate_palette.js PASS済み）
+  - 検証: テスト85件全パス。実データ相当のplan/resultでE2E実行し、深夜2.7hの検出・BOMなし出力・両テーマのスクリーンショット目視まで確認済み
 
 ## 必読ファイル
 

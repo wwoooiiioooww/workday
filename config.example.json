@@ -19,6 +19,15 @@
     }
   },
 
+  "report": {
+    "_comment": "Phase 4 レポート。overtimeCapHours=残業の目安上限(h)。nightStartHour/nightEndHour=深夜割増の対象時間帯(労基法は22-5時)。markdownDirにObsidianのフォルダ絶対パスを書くと、そこへMarkdownレポートを出力する。",
+    "overtimeCapHours": 30,
+    "nightStartHour": 22,
+    "nightEndHour": 5,
+    "htmlDir": "data/report",
+    "markdownDir": "data/report"
+  },
+
   "workday": {
     "_comment": "Phase 3 で使用。",
     "initialUrl": "https://wd5.myworkday.com/cisco/d/home.htmld"
