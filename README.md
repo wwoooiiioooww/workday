@@ -8,7 +8,7 @@ PCの電源が入っていた時間（スタンバイ・シャットダウン除
 |-------|-----------|------|
 | 1 | Collector（PC稼働時間の記録） | ✅ 実機検証完了（2026-07-21） |
 | 2 | Planner（集計・プラン生成・HTMLプレビュー） | ✅ 実機検証完了（2026-07-25） |
-| 3 | Injector（Workday自動入力） | ✅ 実装済み（実機検証待ち） |
+| 3 | Injector（Workday自動入力） | ✅ 実機検証完了（2026-07-26） |
 | 4 | Reporter（勤怠レポート） | 未着手 |
 | 5 | 展開パッケージ（他Windowsユーザー向け） | 未着手 |
 
@@ -74,6 +74,7 @@ node src/plan.js 2026-07 --force
 ```
 
 生成物は `data/plan/YYYY-MM.plan.csv` と `data/plan/YYYY-MM.preview.html`。
+CSVはUTF-8のBOM付きで出力するので、Excelでダブルクリックしても文字化けしない。
 
 ### 休憩・残業の扱い
 

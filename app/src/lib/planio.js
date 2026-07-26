@@ -52,19 +52,25 @@ function csvField(v) {
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
-/** オブジェクト配列をCSVテキストに変換する（columns順）。 */
+// ExcelはUTF-8のCSVをそのまま開くと日本語が文字化けする（Shift_JISと解釈するため）。
+// 先頭にBOMを付けるとUTF-8と認識して正しく開ける。plan.csvは手編集する前提の
+// ファイルなので、書き出し時は必ずBOMを付ける。
+const BOM = '﻿';
+
+/** オブジェクト配列をCSVテキストに変換する（columns順・Excel向けにBOM付き）。 */
 export function toCsv(rows, columns) {
   const lines = [columns.join(',')];
   for (const row of rows) {
     lines.push(columns.map((c) => csvField(row[c])).join(','));
   }
-  return lines.join('\n') + '\n';
+  return BOM + lines.join('\r\n') + '\r\n';
 }
 
 /** CSVテキストをオブジェクト配列にパースする（引用符・エスケープ対応の簡易版）。 */
 export function fromCsv(text) {
   const rows = [];
-  const lines = text.split(/\r?\n/).filter((l) => l.length > 0);
+  // BOM付きで保存されたファイル（Excelで上書き保存した場合など）も読めるようにする
+  const lines = String(text).replace(/^﻿/, '').split(/\r?\n/).filter((l) => l.length > 0);
   if (lines.length === 0) return rows;
   const parseLine = (line) => {
     const out = [];

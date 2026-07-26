@@ -61,3 +61,8 @@ test('残業: 所定7.5hに対する超過(不足は負値で見せる)', () => 
   assert.equal(overtimeMinutes(9 * 60, 60, 7.5), 30);
   assert.equal(overtimeMinutes(7 * 60, 0, 7.5), -30);
 });
+
+test('BOM付きCSVも読める（Excelで上書き保存された場合など）', () => {
+  const withBom = '﻿timestamp,state\n2026-07-20 09:00:00,active\n';
+  assert.equal(parseHeartbeatCsv(withBom).length, 1);
+});

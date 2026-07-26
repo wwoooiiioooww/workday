@@ -8,7 +8,8 @@
  */
 export function parseHeartbeatCsv(text) {
   const byKey = new Map();
-  for (const raw of text.split(/\r?\n/)) {
+  // BOM付きで保存されていても読めるようにする（PowerShellのUTF8出力はBOM付き）
+  for (const raw of String(text).replace(/^\uFEFF/, '').split(/\r?\n/)) {
     const line = raw.trim();
     if (!line || line.startsWith('timestamp')) continue;
     const m = line.match(/^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2}),(active|locked)$/);
