@@ -1,0 +1,36 @@
+{
+  "_comment": "このファイルを config.json にコピーして使用する（install.ps1 が自動でコピーする）。config.json は個人設定なので git 管理外。",
+
+  "collector": {
+    "_comment": "PC稼働時間レコーダーの設定。heartbeatSeconds は記録間隔（最小10秒）。dataDir はリポジトリルートからの相対パスまたは絶対パス。",
+    "heartbeatSeconds": 60,
+    "dataDir": "data/heartbeat"
+  },
+
+  "planner": {
+    "_comment": "Phase 2 で使用。dateSplitHour: この時刻より前は前日の勤務として扱う。standardWorkHoursPerDay: 残業計算の基準(Ciscoは7.5h)。referenceWorkHoursPerDay: 参考併記用。",
+    "dateSplitHour": 5,
+    "standardWorkHoursPerDay": 7.5,
+    "referenceWorkHoursPerDay": 8.0,
+    "breakRules": {
+      "_comment": "労働基準法準拠のデフォルト。6時間超は45分以上、8時間超は60分以上の休憩。",
+      "minutesOver6h": 45,
+      "minutesOver8h": 60
+    }
+  },
+
+  "report": {
+    "_comment": "Phase 4 レポート。overtimeCapHours=残業の目安上限(h)。nightStartHour/nightEndHour=深夜割増の対象時間帯(労基法は22-5時)。markdownDirにObsidianのフォルダ絶対パスを書くと、そこへMarkdownレポートを出力する。",
+    "overtimeCapHours": 30,
+    "nightStartHour": 22,
+    "nightEndHour": 5,
+    "htmlDir": "data/report",
+    "markdownDir": "data/report",
+    "fileNamePattern": "workday-report_{period}"
+  },
+
+  "workday": {
+    "_comment": "Phase 3 で使用。",
+    "initialUrl": "https://wd5.myworkday.com/cisco/d/home.htmld"
+  }
+}

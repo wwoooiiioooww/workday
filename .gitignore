@@ -1,0 +1,12 @@
+# 個人データ・個人設定はコミットしない
+data/
+config.json
+
+# ログ
+*.log
+*.log.old
+
+# Node.js (Phase 2以降)
+node_modules/
+app/playwright-profile/
+app/test-results/
