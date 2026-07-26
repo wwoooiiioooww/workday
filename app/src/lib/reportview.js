@@ -149,7 +149,9 @@ function distChart(dist, { width = 860, height = 200 } = {}) {
 }
 
 export function renderReportHtml(p) {
-  const { period, generated, rows, summary: s, weekday, dist, trend, interruptions, status, flags, source } = p;
+  const { period, generated, rows, summary: s, weekday, dist, trend, interruptions, status, flags, source, coverage } = p;
+  // 部分期間（例: 月の一部しか記録がない）を月次と誤読させないための判定
+  const partial = coverage && (coverage.from !== coverage.periodFrom || coverage.to !== coverage.periodTo);
   const otClass = s.overtimeStdMin > 0 ? 'ot-plus' : (s.overtimeStdMin < 0 ? 'ot-minus' : '');
   const capClass = s.overtimeRemainingToCapMin < 0 ? 'ot-plus' : '';
 
@@ -212,6 +214,8 @@ export function renderReportHtml(p) {
   .flags{background:color-mix(in srgb,var(--series-2) 10%,transparent);border:1px solid var(--series-2);
          border-radius:10px;padding:10px 14px 10px 30px;margin:12px 0}
   .flags li{margin:2px 0}
+  .notice{background:color-mix(in srgb,var(--series-1) 10%,transparent);border:1px solid var(--series-1);
+          border-radius:10px;padding:10px 14px;margin:12px 0;font-size:13px}
   .chart .lbl{fill:var(--text-secondary);font-size:11px}
   .chart .val{fill:var(--text-primary);font-size:11px;font-variant-numeric:tabular-nums}
   .chart .axis{fill:var(--text-muted);font-size:10px}
@@ -233,6 +237,7 @@ export function renderReportHtml(p) {
   <h1>勤怠レポート ${esc(period)}</h1>
   <p class="caption">生成: ${esc(generated)} ／ データ元: ${esc(source)} ／ 所定 ${s.overtimeCapHours ? '' : ''}7.5h/日・深夜帯 22:00-05:00</p>
 
+  ${partial ? `<div class="notice"><b>部分期間のデータです。</b> 対象は ${esc(period)} ですが、記録があるのは ${esc(coverage.from)} 〜 ${esc(coverage.to)} の ${s.workedDays}日分のみです。1日平均などは「記録のある日だけ」の平均です。</div>` : ''}
   ${flags.length ? `<ul class="flags">${flags.map((f) => `<li>${esc(f)}</li>`).join('')}</ul>` : ''}
 
   <div class="cards">

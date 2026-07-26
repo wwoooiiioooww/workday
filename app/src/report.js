@@ -210,10 +210,17 @@ function main() {
   const flagList = buildFlags(summary, rows, status);
   const period = periodLabel({ monthKey, from, to });
   const generated = dateKey(new Date());
-  const payload = { period, generated, rows, summary, weekday, dist, trend, interruptions, status, flags: flagList, source };
+  // 実際に記録があった範囲。対象期間と食い違う場合は「部分期間」として明示する
+  const dates = rows.map((r) => r.date).sort();
+  const coverage = { from: dates[0], to: dates[dates.length - 1], periodFrom: from, periodTo: to };
+  const payload = { period, generated, rows, summary, weekday, dist, trend, interruptions, status, flags: flagList, source, coverage };
 
   // ---- 出力 ----
-  const baseName = monthKey ? `workday-report_${monthKey}` : `workday-report_${from}_${to}`;
+  // ファイル名は設定で変更できる（既定: workday-report_{period}）。
+  // {period} は月次なら YYYY-MM、期間指定なら YYYY-MM-DD_YYYY-MM-DD に置換される。
+  const pattern = config?.report?.fileNamePattern || 'workday-report_{period}';
+  const periodForName = monthKey || `${from}_${to}`;
+  const baseName = pattern.replace('{period}', periodForName).replace(/\.(md|html)$/i, '');
   const htmlPath = path.join(reportDir, `${baseName}.html`);
   fs.mkdirSync(reportDir, { recursive: true });
   fs.writeFileSync(htmlPath, renderReportHtml(payload), 'utf8');

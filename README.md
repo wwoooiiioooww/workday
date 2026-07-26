@@ -211,6 +211,17 @@ Markdownは **BOMなしUTF-8**、frontmatterに機械可読メトリクス（`wo
 本文は表中心の7セクション構成。**確定した月次レポートを守るため、既存ファイルは
 `--force` を付けない限り上書きしない。**
 
+ファイル名は `report.fileNamePattern`（既定 `workday-report_{period}`）で変更できる。
+`{period}` は月次なら `YYYY-MM`、期間指定なら `YYYY-MM-DD_YYYY-MM-DD` に置換される。
+
+**集計範囲の明示**: 対象期間に対して実データが部分的にしかない場合（月の途中から
+記録を始めた等）、frontmatterの `coverage_from` / `coverage_to` / `coverage_is_partial`
+と、本文冒頭の注意書きで明示する。「月次の平均」と誤読されるのを防ぐため。
+
+### 毎月の運用手順
+
+[MONTHLY.md](MONTHLY.md) に、毎月やることをチェックリスト形式でまとめてある。
+
 ## 開発者向け
 
 - Collectorテスト: `pwsh -NoProfile -File collector/tests.ps1`（Linux/Windows両対応）

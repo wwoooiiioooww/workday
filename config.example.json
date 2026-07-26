@@ -25,7 +25,8 @@
     "nightStartHour": 22,
     "nightEndHour": 5,
     "htmlDir": "data/report",
-    "markdownDir": "data/report"
+    "markdownDir": "data/report",
+    "fileNamePattern": "workday-report_{period}"
   },
 
   "workday": {

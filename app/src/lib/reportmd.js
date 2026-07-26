@@ -34,8 +34,10 @@ const md = (date) => date.slice(5);
  *   interruptions, status(null可), flags, source('plan.csv'|'heartbeat')
  */
 export function renderReportMarkdown(p) {
-  const { period, generated, rows, summary: s, weekday, dist, trend, interruptions, status, flags, source } = p;
+  const { period, generated, rows, summary: s, weekday, dist, trend, interruptions, status, flags, source, coverage } = p;
   const worked = rows.filter((r) => r.workMin > 0);
+  // 「対象期間」と「実際にデータがあった範囲」は別物。部分月を月次と誤読されないよう明示する
+  const partial = coverage && (coverage.from !== coverage.periodFrom || coverage.to !== coverage.periodTo);
 
   // ---- frontmatter（機械可読メトリクス） ----
   const fm = [
@@ -46,6 +48,10 @@ export function renderReportMarkdown(p) {
     'source: workday-app',
     `data_source: ${source}`,
     'sensitivity: internal_ai_only',
+    // 実際に記録があった範囲。period が月でも、部分月ならここで判別できる
+    `coverage_from: ${coverage ? coverage.from : 'null'}`,
+    `coverage_to: ${coverage ? coverage.to : 'null'}`,
+    `coverage_is_partial: ${partial ? 'true' : 'false'}`,
     `work_days: ${s.workedDays}`,
     `total_worked_hours: ${toHours(s.workMin)}`,
     `avg_daily_hours: ${hOrNull(s.avgWorkMin)}`,
@@ -75,6 +81,11 @@ export function renderReportMarkdown(p) {
   if (s.workedDays === 0) {
     out.push('対象期間に勤務記録がありません。', '');
   } else {
+    if (partial) {
+      out.push(`> **注意: 部分期間のデータです。** 対象は ${period} ですが、記録があるのは `
+        + `${coverage.from} 〜 ${coverage.to} の ${s.workedDays}日分のみです。`
+        + '月全体の集計として扱わないでください（1日平均などは記録のある日だけの平均です）。', '');
+    }
     out.push(
       `勤務日数 ${s.workedDays}日 / 総実働 ${toHours(s.workMin)}h / 1日平均 ${toHours(s.avgWorkMin)}h。`,
       `残業は 7.5h基準で ${toHours(s.overtimeStdMin)}h（8h換算 ${toHours(s.overtimeRefMin)}h）、`
