@@ -101,13 +101,72 @@ export function fromCsv(text) {
 
 export const PLAN_COLUMNS = ['日付', '曜日', '分類', '開始', '終了', '終了理由', 'メモ'];
 
+/**
+ * 日付を 'YYYY-MM-DD' に正規化する。解釈できなければ null。
+ * Excelで編集すると書式が変わることがあり、旧ツール(ref/)は M/D/YYYY 形式だったため、
+ * 実運用でよく現れる表記をまとめて受け付ける。
+ */
+export function normalizeDate(value) {
+  const s = String(value ?? '').trim();
+  if (!s) return null;
+  const pad = (n) => String(n).padStart(2, '0');
+  let m = s.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/); // 2026-07-03 / 2026/7/3
+  if (m) return `${m[1]}-${pad(m[2])}-${pad(m[3])}`;
+  m = s.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);     // 7/3/2026（旧ツール形式）
+  if (m) return `${m[3]}-${pad(m[1])}-${pad(m[2])}`;
+  return null;
+}
+
+/**
+ * 時刻を 'HH:mm' に正規化する。解釈できなければ null。
+ * 旧ツール(ref/)は HHmm 形式（例 1553、日をまたぐ深夜は 342 や 27）だった。
+ * 桁数が足りないものは4桁にゼロ埋めして解釈する（27 → 0027 → 00:27）。
+ */
+export function normalizeTime(value) {
+  const s = String(value ?? '').trim();
+  if (!s) return null;
+  const pad = (n) => String(n).padStart(2, '0');
+  let m = s.match(/^(\d{1,2}):(\d{2})$/); // 15:53 / 9:05
+  if (m) {
+    const h = Number(m[1]);
+    const mi = Number(m[2]);
+    return h <= 23 && mi <= 59 ? `${pad(h)}:${pad(mi)}` : null;
+  }
+  m = s.match(/^(\d{1,4})$/); // 1553 / 342 / 27（旧ツール形式）
+  if (m) {
+    const four = m[1].padStart(4, '0');
+    const h = Number(four.slice(0, 2));
+    const mi = Number(four.slice(2));
+    return h <= 23 && mi <= 59 ? `${four.slice(0, 2)}:${four.slice(2)}` : null;
+  }
+  return null;
+}
+
+/**
+ * plan.csv の1行を正規化する。日付・時刻が解釈できない行は null を返す
+ * （旧ツールの終了マーカー行 `e,e,e,...` もここで落ちる）。
+ */
+export function normalizePlanRow(row) {
+  const date = normalizeDate(row['日付']);
+  const start = normalizeTime(row['開始']);
+  const end = normalizeTime(row['終了']);
+  if (!date || !start || !end) return null;
+  return { ...row, 日付: date, 開始: start, 終了: end };
+}
+
 export function writePlanCsv(planPath, rows) {
   fs.mkdirSync(path.dirname(planPath), { recursive: true });
   fs.writeFileSync(planPath, toCsv(rows, PLAN_COLUMNS), 'utf8');
 }
 
+/**
+ * plan.csv を読む。日付・時刻は正規化するので、Excelで書式が変わったファイルや
+ * 旧ツール(ref/)形式のファイルもそのまま読める。解釈できない行は取り除かれる。
+ */
 export function readPlanCsv(planPath) {
-  return fromCsv(fs.readFileSync(planPath, 'utf8'));
+  return fromCsv(fs.readFileSync(planPath, 'utf8'))
+    .map(normalizePlanRow)
+    .filter(Boolean);
 }
 
 export function writePreviewHtml(previewPath, html) {
